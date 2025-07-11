@@ -35,6 +35,11 @@ impl IndexedGenes{
 
 	}
 
+	pub fn add(&mut self, name:&str ) {
+		self.names.insert(name.to_string(), self.ids_to_name.len() );
+		self.ids_to_name.push( name.to_string());
+	}
+
 	/// End pattern match subsetting of the gene names structure
 	pub fn subset(&self, regex: &Regex, _offset: usize ) -> IndexedGenes {
         // Use enumerate to build both ids_to_name and names

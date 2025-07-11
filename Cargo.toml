@@ -4,3 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+flate2 = "1.1.2"
+int_to_str = { git="https://github.com/stela2502/int_to_str.git"}
+mapping_info = { git="https://github.com/stela2502/mapping_info.git" }
+rayon = "1.10.0"
+regex = "1.11.1"
+

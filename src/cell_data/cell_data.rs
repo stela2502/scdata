@@ -2,16 +2,16 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 
 use std::collections::hash_map::DefaultHasher;
-use crate::scdata::cell_data::GeneUmiHash;
-use crate::scdata::ambient_rna_detect::AmbientRnaDetect;
+use crate::cell_data::GeneUmiHash;
+use crate::ambient_rna_detect::AmbientRnaDetect;
 
 use std::hash::Hash;
 use std::hash::Hasher;
 
 //use crate::geneids::GeneIds;
-use crate::scdata::IndexedGenes;
+use crate::IndexedGenes;
 use core::fmt;
-use crate::int_to_str::IntToStr;
+use int_to_str::int_to_str::IntToStr;
 
 
 /// CellData here is a storage for the total UMIs. UMIs will be checked per cell
@@ -35,14 +35,43 @@ pub struct CellData{
 }
 
 
-
-// Implementing Display trait for MapperResult
 impl fmt::Display for CellData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "CellData with {} genes and {} total_umis", 
-            self.genes.len(), self.total_umis )
+        writeln!(f, "CellData Summary")?;
+        writeln!(f, "----------------")?;
+        writeln!(f, "Cell Name (ID): {}", self.name)?;
+        writeln!(f, "Passing Filter: {}", self.passing)?;
+        writeln!(f, "Total UMIs: {}", self.total_umis)?;
+        writeln!(f, "Number of Genes with UMIs: {}", self.genes.len())?;
+
+        writeln!(f, "\nGenes with Data ({}):", self.genes_with_data.len())?;
+        for gene in &self.genes_with_data {
+            writeln!(f, "  - {}", gene)?;
+        }
+
+        writeln!(f, "\nTotal Read per Gene Length:")?;
+        for (length, count) in &self.total_reads {
+            writeln!(f, "  {} bp: {}", length, count)?;
+        }
+
+        writeln!(f, "\nGene UMI Counts:")?;
+        for (key, val) in &self.genes {
+            writeln!(f, "  {:?} => {:.2}", key, val)?; // fallback to Debug if no Display
+        }
+
+        writeln!(f, "\nMultimappers ({} entries):", self.multimapper.len())?;
+        for (seq_id, (gene_ids, positions)) in &self.multimapper {
+            writeln!(
+                f,
+                "  Seq {}: Genes {:?}, Positions {:?}",
+                seq_id, gene_ids, positions
+            )?;
+        }
+
+        Ok(())
     }
 }
+
 
 impl CellData{
     pub fn new(  name: u64 ) -> Self{
@@ -89,7 +118,7 @@ impl CellData{
     }
 
     pub fn deep_clone(&self) -> CellData {
-        let cloned_genes: BTreeMap<GeneUmiHash , usize> = self
+        let cloned_genes: BTreeMap<GeneUmiHash , f32> = self
             .genes
             .iter()
             .map(|(k, v)| (*k, *v)) // Clone each HashSet within the BTreeMap
@@ -136,13 +165,13 @@ impl CellData{
     pub fn merge_re_id_genes(&mut self, other: &CellData, other_genes: &Vec::<usize> ) {
         self.total_umis += other.total_umis;
 
-        for (gene_umi_combo, _counts) in &other.genes {
+        for (gene_umi_combo, counts) in &other.genes {
             // re-id the UMI count touple
             let re_ided_umi_combo= GeneUmiHash( 
                 other_genes[gene_umi_combo.0],
                 gene_umi_combo.1
             );
-            let _ = self.add( re_ided_umi_combo );
+            let _ = self.add( re_ided_umi_combo, *counts );
             /*
             if ! self.add( re_ided_umi_combo ){
                 // This combination has already been recorded!
@@ -218,11 +247,32 @@ impl CellData{
     pub fn n_umi_4_gene_id( &self, gene_id:&usize ) -> usize{
         *self.total_reads.get( gene_id ).unwrap_or(&0)
     }
+
+    pub fn get_mean_for_gene(&self, gene_id: &usize) -> Option<f32> {
+        let mut sum = 0.0;
+        let mut count = 0;
+
+        for (key, value) in self.genes.iter() {
+            if key.0 == *gene_id {
+                sum += value;
+                count += 1;
+            }
+        }
+
+        if count > 0 {
+            Some(sum / count as f32)
+        } else {
+            None
+        }
+    }
     
-    pub fn to_str(&self, gene_info:&IndexedGenes, names: &Vec<String>, int_2_str: &IntToStr, length:usize ) -> String {
+    
+    pub fn to_str(&self, gene_info:&IndexedGenes, names: &Vec<String>, length:usize ) -> String {
 
         let mut data = Vec::<std::string::String>::with_capacity( names.len()+4 ); 
-        data.push(format!( "{}", int_2_str.u64_to_string( length, &self.name ) ) );
+
+
+        data.push(format!( "{}", IntToStr::u8_array_to_str( &self.name.to_le_bytes() ) ) );
 
         // here our internal data already should be stored with the same ids as the gene names.
         let mut total = 0;

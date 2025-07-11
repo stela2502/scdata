@@ -4,17 +4,18 @@
 
 use std::collections::BTreeMap;
 use std::collections::HashSet;
-
+use std::io::BufReader;
+use std::io::BufRead;
 
 //use crate::geneids::GeneIds;
 //use crate::fast_mapper::FastMapper;
-use crate::mapping_info::MappingInfo;
-use crate::scdata::cell_data::GeneUmiHash;
-//use crate::scdata::ambient_rna_detect::AmbientRnaDetect;
-use crate::scdata::CellData;
+use mapping_info::MappingInfo;
+use crate::cell_data::GeneUmiHash;
+//use crate::ambient_rna_detect::AmbientRnaDetect;
+use crate::CellData;
 //use crate::cellids::CellIds;
-use crate::scdata::IndexedGenes;
-use crate::int_to_str::IntToStr;
+use crate::indexed_genes::IndexedGenes;
+use int_to_str::int_to_str::IntToStr;
 
 use std::io::BufWriter;
 use std::fs::File;
@@ -23,6 +24,7 @@ use std::fs;
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
+use flate2::read::GzDecoder;
 
 use std::path::PathBuf;
 use std::path::Path;
@@ -30,6 +32,14 @@ use std::path::Path;
 use rayon::prelude::*;
 use core::fmt;
 
+#[derive(Debug, PartialEq, Clone)]
+pub enum MatrixValueType {
+    Integer,
+    Real,
+    Complex,
+    Pattern,
+    Unknown(String),
+}
 
 // This Scdata needs to copy some of the logics from split2samples - no it actually is totally different
 // Here we look for new sample ids and each sample id needs to be a total match to the previousely identified sample id
@@ -45,22 +55,58 @@ pub struct Scdata{
     pub genes_with_data: HashSet<usize>,
     pub num_threads:usize,
     //ambient_store:AmbientRnaDetect,
+    value_type: MatrixValueType,
 }
 
 impl Default for Scdata {
     fn default() -> Self {
-        Self::new(1)
+        Self::new(1, MatrixValueType::Integer)
     }
 }
 
 
-impl fmt::Display for Scdata {
+/*impl fmt::Display for Scdata {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let checked = match self.checked{
             true => "checked".to_string(),
             false => "unchecked".to_string(),
         };
-        write!(f, "Scdata with {} cells and {} genes ({})", self.keys().len(), self.genes_with_data.len(), checked )
+        write!(f, "Scdata ({}) with {} cells and {} genes ({})", self.value_type, self.keys().len(), self.genes_with_data.len(), checked );
+
+    }
+}*/
+
+impl fmt::Display for Scdata {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Scdata Summary")?;
+        writeln!(f, "===============")?;
+        writeln!(f, "Checked: {}", self.checked)?;
+        writeln!(f, "Passing Cells: {}", self.passing)?;
+        writeln!(f, "Matrix Value Type: {:?}", self.value_type)?;
+        writeln!(f, "Genes to Print: [{} genes]", self.genes_to_print.len())?;
+        writeln!(f, "Genes with Data: [{} entries]", self.genes_with_data.len())?;
+
+        let mut total_cells = 0;
+        let mut non_empty_buckets = 0;
+        for (i, map) in self.data.iter().enumerate() {
+            if !map.is_empty() {
+                total_cells += map.len();
+                non_empty_buckets += 1;
+                writeln!(f, "  Bucket {}: {} cells", i, map.len())?;
+                if f.alternate() {
+                    for (cell_id, cell_data) in map.iter().take(2) { // preview only
+                        writeln!(f, "    Cell ID {}:\n{}", cell_id, cell_data)?;
+                    }
+                    if map.len() > 2 {
+                        writeln!(f, "    ... {} more cells", map.len() - 2)?;
+                    }
+                }
+            }
+        }
+        writeln!(f, "Total Cells: {}", total_cells)?;
+        writeln!(f, "Non-empty Buckets: {}", non_empty_buckets)?;
+
+        Ok(())
     }
 }
 
@@ -68,7 +114,7 @@ impl fmt::Display for Scdata {
 impl Scdata{
 
     //pub fn new(kmer_size:usize )-> Self {
-    pub fn new(num_threads:usize )-> Self {
+    pub fn new(num_threads:usize, value_type: MatrixValueType )-> Self {
 
         const EMPTY_MAP: BTreeMap<u64, CellData> = BTreeMap::new();
         let data = [EMPTY_MAP ;u8::MAX as usize];
@@ -85,6 +131,7 @@ impl Scdata{
             genes_with_data,
             num_threads,
             //ambient_store:AmbientRnaDetect::new(),
+            value_type,
         }
     }
 
@@ -97,7 +144,7 @@ impl Scdata{
         self.data.iter().flat_map(|map| map.values())
     }
 
-    fn keys(&self) -> Vec<u64> {
+    pub fn keys(&self) -> Vec<u64> {
         let mut all_keys = Vec::new();
         for map in &self.data {
             all_keys.extend(map.keys().copied());
@@ -224,38 +271,10 @@ impl Scdata{
         }
     }
 
-    /* // my old fucntion:
-    pub fn merge( &mut self, other:&Scdata ){
-        // reset all internal measurements
-        self.checked= false;
-        self.passing = 0;
-        self.genes_with_data = HashSet::new();
-
-        for other_cell in other.values() {
-            let index = self.to_key(&other_cell.name); // Extracting the first u8 of the u64 key
-            match self.data[index].entry(other_cell.name) {
-                std::collections::btree_map::Entry::Occupied(mut entry) => {
-                    // If cell exists, merge with existing cell
-                    let cell = entry.get_mut();
-                    cell.merge(other_cell);
-                }
-                std::collections::btree_map::Entry::Vacant(entry) => {
-                    // If cell doesn't exist, insert new cell
-                    entry.insert(other_cell.deep_clone());
-                }
-            }
-        }
-    }*/
-
-    /// checks if there are cells that seam to contain data from another cell.
-    /// Meaning there are the same gene/umi combinations in both cells
-    pub fn find_cell_cell_obverlaps( &mut self ) {
-
-    }
 
 
     /// try_insert now is more slick and insterts the data in 256 different sub-areas.
-    pub fn try_insert(&mut self, name: &u64, data: GeneUmiHash, value:u32, report: &mut MappingInfo) -> bool {
+    pub fn try_insert(&mut self, name: &u64, data: GeneUmiHash, value:f32, report: &mut MappingInfo) -> bool {
         let index = self.to_key(name); // Extracting the first u8 of the u64 key
         self.genes_with_data.insert(data.0);
         self.checked = false;
@@ -311,13 +330,12 @@ impl Scdata{
 
         //println!("We are here exporting a samples table and want these samples to be included: {:?}", names );
         //println!("And we have these ids for them: {:?} using the offset", genes.ids_for_gene_names( names) );
-        let i2s = IntToStr::new( b"AAA".to_vec(), 32 ).unwrap();
 
         for cell_obj in self.values() {
             if ! cell_obj.passing{
                 continue;
             }
-            let text = cell_obj.to_str( genes, names, &i2s, 32 );
+            let text = cell_obj.to_str( genes, names, 32 );
             //println!("this should contain some info {}", text);
             match writeln!( writer, "{text}" ){
                 Ok(_) => passed +=1,
@@ -336,8 +354,17 @@ impl Scdata{
     /// this will create a path and populate that with 10x kind of files.
     pub fn write_sparse (&mut self, file_path: PathBuf, genes: &IndexedGenes, min_count:usize) -> Result< String, String>{
         let names= genes.get_all_gene_names();
-        return self.write_sparse_sub( file_path, genes, &names, min_count);
+        match self.value_type{
+            MatrixValueType::Integer => {
+                self.write_sparse_sub( file_path, genes, &names, min_count)
+            },
+            MatrixValueType::Real => {
+                self.write_sparse_sub_real( file_path, genes, &names, min_count)
+            },
+            _ => panic!("Not suported type")
+        }
     }
+
 
     /// this utilizes the new f32 value (e.g. mean read quality) as data and writes a real MatrixMarket table
     pub fn write_sparse_sub_real(
@@ -391,11 +418,10 @@ impl Scdata{
 
         self.keep_only_passing_cells();
         let gene_ids = genes.ids_for_gene_names(&self.genes_to_print);
-        let i2s = IntToStr::new(b"AAAA".to_vec(), 32).unwrap();
+        let i2s = IntToStr::new("AAAA");
 
         let mut entries = 0;
         let mut cell_id = 0;
-        let mut cell_name = String::new();
 
         // MatrixMarket header for float values
         writeln!(
@@ -414,16 +440,18 @@ impl Scdata{
             }
 
             cell_id += 1;
-            i2s.u64_to_str(16, &cell_obj.name, &mut cell_name);
+            //cell_obj.name is a u64
+
+            let cell_name = IntToStr::from_u64( cell_obj.name ).to_string(16);
+
             writeln!(writer_b, "{}", &cell_name)
                 .map_err(|err| {
                     eprintln!("write error: {err}");
                     "cell barcode could not be written".to_string()
                 })?;
-            cell_name.clear();
 
             // Aggregate mean value for each gene in the cell
-            let mut gene_sums: BTreeMap<u32, (f32, usize)> = BTreeMap::new();
+            let mut gene_sums: BTreeMap<usize, (f32, usize)> = BTreeMap::new();
 
             for (gh, value) in &cell_obj.genes {
                 if gene_ids.contains(&gh.0) {
@@ -544,8 +572,7 @@ impl Scdata{
 
         let gene_ids = genes.ids_for_gene_names( &self.genes_to_print );
 
-        let i2s = IntToStr::new(b"AAAA".to_vec(), 32).unwrap();
-        let mut cell_name = "".to_string();
+        let i2s = IntToStr::new("AAAA");
 
         for cell_obj in self.values() {
             if ! cell_obj.passing {
@@ -553,7 +580,7 @@ impl Scdata{
             }
             cell_id += 1;
             // this in fact reduces the cell id to 16 nucleotides (u32) the normal length of a cell id for 10x
-            i2s.u64_to_str( 16, &cell_obj.name, &mut cell_name); 
+            let cell_name =  IntToStr::u8_array_to_str( &cell_obj.name.to_le_bytes() );// IntToStr::from_u64(cell_obj.name).to_string(16); 
             //println!("Cell ID {} became seq {}", &cell_obj.name, &cell_name );
             match writeln!( writer_b,"{}", &cell_name){
                 Ok(_) => (),
@@ -562,7 +589,6 @@ impl Scdata{
                     return Err( "cell barcode could not be written".to_string())   
                 }
             };
-            cell_name.clear();
 
             for (gene_id, id) in gene_ids.iter().enumerate() {
                 let n = cell_obj.n_umi_4_gene_id( id);
@@ -725,6 +751,101 @@ impl Scdata{
             count += cell_obj.n_reads( genes, names )
         }
         count
+    }
+
+    pub fn read_matrix_market<P: AsRef<Path>>(path: P) -> Result<(Self, IndexedGenes), String> {
+
+        let base = path.as_ref();
+
+        let mut report = MappingInfo::new( None, 0.0, 0 );
+
+        let barcodes_path = base.join("barcodes.tsv.gz");
+        let features_path = base.join("features.tsv.gz");
+        let matrix_path = base.join("matrix.mtx.gz");
+
+        // Read barcodes
+        let barcodes: Vec<u64> = {
+            let f = File::open(barcodes_path).map_err(|e| format!("Cannot open barcodes: {e}"))?;
+            let reader = BufReader::new(GzDecoder::new(BufReader::new(f)));
+
+            reader
+                .lines()
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("Failed to read barcodes: {e}"))?
+                .into_iter()
+                .map(|barcode| {
+                    println!("The read barcode: {}", barcode);
+                    let encoded = IntToStr::new(&barcode).into_u64();
+                    encoded
+                })
+                .collect()
+        };
+
+
+        let f = File::open(features_path).map_err(|e| format!("Cannot open features: {e}"))?;
+        let reader_f = BufReader::new(GzDecoder::new(BufReader::new(f)));
+
+        let mut indexed = IndexedGenes::empty(None);
+        for line in reader_f.lines() {
+            let line = line.unwrap();
+            let fields: Vec<&str> = line.split('\t').collect();
+            if let Some(gene_id) = fields.get(0) {
+                indexed.add(gene_id);
+            } else {
+                return Err(format!("Malformed gene line: {line:?}"));
+            }
+        }
+
+        let file = File::open(matrix_path).map_err(|e| format!("Failed to open file: {e}"))?;
+        let reader_mtx = BufReader::new(GzDecoder::new(BufReader::new(file)));
+
+
+        let mut lines = reader_mtx.lines();
+        let mut dims = false;
+        let mut header = false;
+
+        let mut scdata = Scdata::new(1, MatrixValueType::Integer );
+
+        // Read entries
+        for line in lines {
+            let line = line.unwrap();
+            if ! header {
+                header = true;
+                let header_parts: Vec<String> = line
+                    .trim()
+                    .split_whitespace()
+                    .map(|s| s.to_string())
+                    .collect();
+                if header_parts[3].to_lowercase().as_str() == "real" {
+                    scdata.value_type=  MatrixValueType::Real
+                }
+                continue;
+            }
+
+            if ! dims {
+                dims = true;
+                continue;
+            }
+            println!("This should be a data line? {}", line);
+            let mut parts = line.split_whitespace();
+            let row = parts.next().ok_or("Missing row")?.parse::<usize>().map_err(|e| e.to_string())?;
+            let col = parts.next().ok_or("Missing col")?.parse::<usize>().map_err(|e| e.to_string())?;
+            let val = parts.next().ok_or("Missing value")?.parse::<f32>().map_err(|e| e.to_string())?;
+            //pub fn try_insert(&mut self, name: &u64, data: GeneUmiHash, value:f32, report: &mut MappingInfo) -> bool {
+            match &scdata.value_type {
+                &MatrixValueType::Integer => {
+                    for umi in 0..val as u64 {
+                        scdata.try_insert( &barcodes[col-1], GeneUmiHash( row-1, umi ), 0.0, &mut report );
+                    }
+                },
+                &MatrixValueType::Real => {
+                    scdata.try_insert( &barcodes[col-1], GeneUmiHash( row-1, 1 ), val , &mut report );
+                },
+                _ => unreachable!()
+            };
+        }
+
+        Ok(( scdata, indexed ))
     }
 }
 

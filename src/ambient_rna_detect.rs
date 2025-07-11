@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::singlecelldata::cell_data::GeneUmiHash;
+use crate::cell_data::GeneUmiHash;
 
 /// Ambient RNA is RNA that more or less floats through the library creation space,
 /// being captured by a multitiude of cells. This seams to lead to multiple cells
