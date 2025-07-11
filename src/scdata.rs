@@ -135,6 +135,13 @@ impl Scdata{
         }
     }
 
+    pub fn value_type( &mut self, value_type: Option<MatrixValueType> ) -> &MatrixValueType {
+        if let Some(val) = value_type{
+            self.value_type = val;
+        }
+        &self.value_type
+    }
+
     fn to_key(&self, name: &u64 ) -> usize{
         // 48 = 64 -16
         (*name >> 54) as usize
