@@ -353,13 +353,13 @@ impl Scdata{
             };
         }
 
-        println!( "dense matrix: {passed} cell written");
+        println!( "dense matrix: {passed} cell written to {}", file_path.display());
         Ok( () )
     }
 
 
     /// this will create a path and populate that with 10x kind of files.
-    pub fn write_sparse (&mut self, file_path: PathBuf, genes: &IndexedGenes, min_count:usize) -> Result< String, String>{
+    pub fn write_sparse (&mut self, file_path: &PathBuf, genes: &IndexedGenes, min_count:usize) -> Result< String, String>{
         let names= genes.get_all_gene_names();
         match self.value_type{
             MatrixValueType::Integer => {
@@ -376,7 +376,7 @@ impl Scdata{
     /// this utilizes the new f32 value (e.g. mean read quality) as data and writes a real MatrixMarket table
     pub fn write_sparse_sub_real(
         &mut self,
-        file_path: PathBuf,
+        file_path: &PathBuf,
         genes: &IndexedGenes,
         names: &Vec<String>,
         min_count: usize
