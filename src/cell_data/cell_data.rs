@@ -190,6 +190,7 @@ impl CellData{
     /// Returns `true` if inserted, `false` if a duplicate was detected and ignored.
     pub fn add(&mut self, gh: GeneUmiHash, value: f32) -> bool {
         if self.genes.contains_key(&gh) {
+            #[cfg(debug_assertions)]
             eprintln!(
                 "Warning: duplicate GeneUmiHash {:?} detected in cell {} — ignoring.",
                 gh,
