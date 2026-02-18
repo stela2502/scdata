@@ -301,13 +301,13 @@ impl Scdata{
     }
 
 
-    pub fn write (&mut self, file_path: PathBuf, genes:&IndexedGenes, min_count:usize) -> Result< (), &str>{
+    pub fn write (&mut self, file_path: &PathBuf, genes:&IndexedGenes, min_count:usize) -> Result< (), &str>{
 
         let names = genes.get_all_gene_names();
         return self.write_sub( file_path, genes, &names, min_count);
     }
 
-    pub fn write_sub (&mut self, file_path: PathBuf, genes:&IndexedGenes, names: &Vec<String>, min_count:usize) -> Result< (), &str>{
+    pub fn write_sub (&mut self, file_path: &PathBuf, genes:&IndexedGenes, names: &Vec<String>, min_count:usize) -> Result< (), &str>{
     
         let rs:bool = Path::new( &file_path ).exists();
         if rs && fs::remove_file(  &file_path ).is_ok(){};
