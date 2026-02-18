@@ -11,3 +11,4 @@ pub use crate::scdata::Scdata as Scdata;
 pub use crate::cell_data::CellData  as CellData;
 pub use crate::ambient_rna_detect::AmbientRnaDetect  as AmbientRnaDetect;
 pub use crate::indexed_genes::IndexedGenes as IndexedGenes;
+pub use crate::scdata::MatrixValueType;

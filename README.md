@@ -5,13 +5,12 @@
 # scdata
 
 A re-implementation of my Rustody::singlecelldata::SingleCellData class.
-In comparison to that this class can now collect per gene+UMI f32 values and stores them as mean f32 in the saved files.
+In comparison to that this class can now collect per gene+UMI f32 values and store them as mean f32 in the saved files.
 In order to get this you need to create the object using the ``MatrixValueType::Real`` like that.
 
 ```
 use scdata::Scdata;
 use scdata::cell_data::GeneUmiHash;
-use crate::cell_data::GeneUmiHash;
 
 let mut celldata = Scdata::new( 1, MatrixValueType::Real ); // only one thread here
 

@@ -35,6 +35,43 @@ impl IndexedGenes{
 
 	}
 
+	/// Create an IndexedGenes from any iterable of string-like items.
+    ///
+    /// Accepts:
+    /// - Vec<String>
+    /// - &[String]
+    /// - Vec<&str>
+    /// - &[&str]
+    /// - any iterator yielding string-like items
+    ///
+    /// Duplicate names are ignored after the first occurrence.
+    pub fn from_names<I, S>(names: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut name_map = BTreeMap::new();
+        let mut ids_to_name = Vec::new();
+
+        for name in names {
+            let name_ref = name.as_ref();
+
+            if name_map.contains_key(name_ref) {
+                continue;
+            }
+
+            let id = ids_to_name.len();
+            name_map.insert(name_ref.to_string(), id);
+            ids_to_name.push(name_ref.to_string());
+        }
+
+        Self {
+            names: name_map,
+            ids_to_name,
+            offset: 0,
+        }
+    }
+
 	pub fn add(&mut self, name:&str ) {
 		self.names.insert(name.to_string(), self.ids_to_name.len() );
 		self.ids_to_name.push( name.to_string());

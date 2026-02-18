@@ -146,6 +146,7 @@ impl CellData{
         for (gene_umi_combo, value) in &other.genes {
             if self.genes.contains_key(gene_umi_combo) {
                 // Warn once per duplicate
+                #[cfg(debug_assertions)]
                 eprintln!(
                     "Warning: duplicate GeneUmiHash {:?} found during merge for cell {}",
                     gene_umi_combo,
