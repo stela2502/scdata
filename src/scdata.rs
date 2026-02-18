@@ -488,14 +488,14 @@ impl Scdata{
             cell_id,
             gene_ids.len(),
             entries,
-            file_path.into_os_string().into_string()
+            file_path.display()
         );
         println!("{}", report);
         Ok(report)
     }
 
     /// this utilizes the UMI counts data and writes an integer MatrixMarket table
-    pub fn write_sparse_sub (&mut self, file_path: PathBuf, genes:&IndexedGenes, names: &Vec<String>, min_count:usize) -> Result<String, String>{
+    pub fn write_sparse_sub (&mut self, file_path: &PathBuf, genes:&IndexedGenes, names: &Vec<String>, min_count:usize) -> Result<String, String>{
             
         let rs = Path::new( &file_path ).exists();
 
@@ -610,7 +610,8 @@ impl Scdata{
                 }
             }
         } 
-        let report = format!("sparse Matrix: {} cell(s), {} gene(s) and {} entries written to path {:?}; ", cell_id, gene_ids.len(), entries, file_path.into_os_string().into_string());
+        let report = format!("sparse Matrix: {} cell(s), {} gene(s) and {} entries written to path {:?}; ", 
+            cell_id, gene_ids.len(), entries, file_path.display());
         println!( "{}",report );
         Ok( report )
     }
