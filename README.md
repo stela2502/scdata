@@ -42,12 +42,12 @@ Specifies the Matrix Market value type: - `Integer` - `Real` -
 
 # Design Philosophy
 
--   Sparse-first architecture
--   Incremental insertion (`try_insert`)
--   Explicit gene indexing
--   Controlled merging
--   Minimal dependencies
--   Matrix Market interoperability
+- Sparse-first architecture
+- Incremental insertion (`try_insert`)
+- Explicit gene indexing
+- Controlled merging
+- Minimal dependencies
+- Matrix Market interoperability
 
 ------------------------------------------------------------------------
 
@@ -55,7 +55,7 @@ Specifies the Matrix Market value type: - `Integer` - `Real` -
 
 Add to your `Cargo.toml`:
 
-``` toml
+```toml
 scdata = { git = "https://github.com/stela2502/scdata" }
 ```
 
@@ -65,7 +65,7 @@ scdata = { git = "https://github.com/stela2502/scdata" }
 
 ## 1️⃣ Create Gene Index
 
-``` rust
+```rust
 use scdata::IndexedGenes;
 
 let genes = IndexedGenes::from_names(vec![
@@ -81,7 +81,7 @@ This creates a stable mapping between gene names and internal indices.
 
 ## 2️⃣ Create a Sparse Dataset
 
-``` rust
+```rust
 use scdata::{Scdata, MatrixValueType};
 
 let mut data = Scdata::new(
@@ -94,17 +94,14 @@ let mut data = Scdata::new(
 
 ## 3️⃣ Insert Counts
 
-``` rust
-use scdata::{Scdata, GeneUmiHash};
+```rust
+use scdata::Scdata;
 use mapping_info::MappingInfo; // example external report struct
 
 let mut report = MappingInfo::default();
 
 let cell_id: u64 = 123456;
-let umi: u64 = 1;
-let gene_id = 1;
-
-let gene_hash: GeneUmiHash{gene_id, umi };
+let gene_hash: GeneUmiHash = ...; // your gene/UMI hash structure
 
 data.try_insert(
     &cell_id,
@@ -121,7 +118,7 @@ data.try_insert(
 
 ## 4️⃣ Merge Datasets
 
-``` rust
+```rust
 data.merge(&other_dataset);
 ```
 
@@ -133,11 +130,10 @@ This merges sparse cell structures efficiently.
 
 ### Write filtered matrix
 
-``` rust
+```rust
 use std::path::PathBuf;
 
 let output = PathBuf::from("matrix.mtx");
-let genes = IndexedGenes::from_names( vec!["GeneName1", "GeneName2" ]);
 
 data.write(
     &output,
@@ -148,7 +144,7 @@ data.write(
 
 ### Write sparse format explicitly
 
-``` rust
+```rust
 data.write_sparse(
     &output,
     &genes,
@@ -160,7 +156,7 @@ data.write_sparse(
 
 ## 6️⃣ Read Matrix Market
 
-``` rust
+```rust
 let (data, genes) =
     Scdata::read_matrix_market("matrix.mtx").unwrap();
 ```
@@ -171,12 +167,20 @@ This loads both: - The sparse matrix - The gene index
 
 # Internal Structure
 
+```text
+Scdata
+ ├── data: [BTreeMap<u64, CellData>; 255]
+ ├── genes_with_data: HashSet<usize>
+ ├── num_threads
+ └── value_type
+```
+
 Key design features:
 
--   Per-thread storage buckets
--   BTreeMap for deterministic ordering
--   Gene-level tracking via `genes_with_data`
--   Lazy validation (`checked` flag)
+- Per-thread storage buckets
+- BTreeMap for deterministic ordering
+- Gene-level tracking via `genes_with_data`
+- Lazy validation (`checked` flag)
 
 ------------------------------------------------------------------------
 
@@ -192,17 +196,17 @@ Typical 10x-style layout:
 
 You can integrate this library into pipelines that:
 
--   Process CellRanger outputs
--   Produce Scanpy-compatible matrices
--   Export to downstream R/Python workflows
+- Process CellRanger outputs
+- Produce Scanpy-compatible matrices
+- Export to downstream R/Python workflows
 
 ------------------------------------------------------------------------
 
 # Threading Model
 
--   `num_threads` controls internal parallelization
--   Designed for deterministic merge behavior
--   No implicit global locks
+- `num_threads` controls internal parallelization
+- Designed for deterministic merge behavior
+- No implicit global locks
 
 ------------------------------------------------------------------------
 
@@ -218,11 +222,11 @@ You can integrate this library into pipelines that:
 
 # Roadmap Ideas
 
--   Whitelist-based sample detection
--   Improved ambient RNA modeling
--   HDF5 export
--   10x-compatible directory export
--   Compression support
+- Whitelist-based sample detection
+- Improved ambient RNA modeling
+- HDF5 export
+- 10x-compatible directory export
+- Compression support
 
 ------------------------------------------------------------------------
 
