@@ -63,7 +63,7 @@ mod tests {
             fs::remove_dir_all(&out_dir).unwrap();
         }
 
-        let result = celldata.write_sparse( out_dir.clone(), &indexed_genes, 1 );
+        let result = celldata.write_sparse( &out_dir, &indexed_genes, 1 );
         
         // Paths to output files
         let matrix_path = out_dir.join("matrix.mtx.gz");
@@ -133,7 +133,7 @@ mod tests {
             fs::remove_dir_all(&out_dir).unwrap();
         }
 
-        let result = celldata.write_sparse( out_dir.clone(), &indexed_genes, 1 );
+        let result = celldata.write_sparse( &out_dir, &indexed_genes, 1 );
         
         // Paths to output files
         let matrix_path = out_dir.join("matrix.mtx.gz");
