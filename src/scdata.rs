@@ -855,6 +855,62 @@ impl Scdata{
 
         Ok(( scdata, indexed ))
     }
+
+    /// Compute the set of passing cells by UMI count (parallel).
+    /// Does NOT mutate `self` (no `passing` flags, no `retain`).
+    /// This is part 1 of the new filter approach - find the good cells.
+    pub fn passing_cell_set_by_umi(&self, min_count: usize) -> HashSet<u64> {
+        let keys = self.keys();
+        if keys.is_empty() {
+            return HashSet::new();
+        }
+
+        // avoid div-by-zero / silly chunking
+        let n_threads = self.num_threads.max(1);
+        let chunk_size = keys.len() / n_threads + 1;
+
+        let passing: Vec<u64> = keys
+            .par_chunks(chunk_size)
+            .flat_map(|chunk| {
+                let mut keep = Vec::<u64>::with_capacity(chunk.len());
+                for key in chunk {
+                    if let Some(cell) = self.get(key) {
+                        if cell.n_umi() >= min_count {
+                            keep.push(*key);
+                        }
+                    }
+                }
+                keep
+            })
+            .collect();
+
+        passing.into_iter().collect()
+    }
+    fn rebuild_genes_with_data(&mut self) {
+        self.genes_with_data.clear();
+
+        // Assuming CellData has `genes: BTreeMap<GeneUmiHash, f32>` (like your write_sparse_sub_real uses)
+        for cell in self.data.iter().flat_map(|m| m.values()) {
+            for (gh, _val) in &cell.genes {
+                self.genes_with_data.insert(gh.0);
+            }
+        }
+    }
+
+    /// new export startegy - identify passing cells from one data and apply the same filter later
+    /// This is part 2 - the apply filter part for that strategy.
+    pub fn restrict_to_cells(&mut self, keep: &HashSet<u64>) {
+        self.passing = 0;
+        for bucket in &mut self.data {
+            bucket.retain(|cell_id, _| keep.contains(cell_id));
+        }
+        for cell in self.data.iter_mut().flat_map(|m| m.values_mut()) {
+            cell.passing = true;
+            self.passing += 1;
+        }
+        self.rebuild_genes_with_data();
+        self.checked = true;
+    }
 }
 
 

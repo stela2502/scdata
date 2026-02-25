@@ -158,5 +158,92 @@ mod tests {
         assert_eq!( scdata.get( &1_u64 ).unwrap().get_mean_for_gene( &indexed_genes.get_gene_id("Gene4") ), Some(2.225));
 
     }
+        use std::collections::HashSet;
+
+    #[test]
+    fn passing_cell_set_by_umi_parallel_matches_expected() {
+        let mut celldata = Scdata::new(1, MatrixValueType::Integer); // single thread here
+        let mut report = MappingInfo::new(None, 56.0, 10000);
+
+        // Cell 1: 30 UMIs total (20 for gene0 + 10 for gene3)
+        for umi in 0..20 {
+            assert!(celldata.try_insert(&1_u64, GeneUmiHash(0, umi as u64), 0.0, &mut report));
+        }
+        for umi in 20..30 {
+            assert!(celldata.try_insert(&1_u64, GeneUmiHash(3, umi as u64), 0.0, &mut report));
+        }
+
+        // Cell 2: 40 UMIs total (20 for gene2 + 20 for gene0)
+        for umi in 0..20 {
+            assert!(celldata.try_insert(&13452355_u64, GeneUmiHash(2, umi as u64), 0.0, &mut report));
+            assert!(celldata.try_insert(&13452355_u64, GeneUmiHash(0, umi as u64), 0.0, &mut report));
+        }
+
+        // Threshold 1: both pass
+        let passing = celldata.passing_cell_set_by_umi(1);
+        assert!(passing.contains(&1_u64));
+        assert!(passing.contains(&13452355_u64));
+        assert_eq!(passing.len(), 2);
+
+        // Threshold 31: only cell2 passes (40 >= 31, 30 < 31)
+        let passing = celldata.passing_cell_set_by_umi(31);
+        assert!(!passing.contains(&1_u64));
+        assert!(passing.contains(&13452355_u64));
+        assert_eq!(passing.len(), 1);
+
+        // Threshold 41: none pass
+        let passing = celldata.passing_cell_set_by_umi(41);
+        assert!(passing.is_empty());
+
+        // IMPORTANT: this function must not mutate Scdata
+        assert!(celldata.get(&1_u64).is_some());
+        assert!(celldata.get(&13452355_u64).is_some());
+    }
+
+    #[test]
+    fn restrict_to_cells_removes_others_and_invalidates_cached_state() {
+        let mut celldata = Scdata::new(1, MatrixValueType::Integer);
+        let mut report = MappingInfo::new(None, 56.0, 10000);
+
+        // Populate the same two cells as in the other tests.
+        for umi in 0..20 {
+            assert!(celldata.try_insert(&1_u64, GeneUmiHash(0, umi as u64), 0.0, &mut report));
+        }
+        for umi in 20..30 {
+            assert!(celldata.try_insert(&1_u64, GeneUmiHash(3, umi as u64), 0.0, &mut report));
+        }
+
+        for umi in 0..20 {
+            assert!(celldata.try_insert(&13452355_u64, GeneUmiHash(2, umi as u64), 0.0, &mut report));
+            assert!(celldata.try_insert(&13452355_u64, GeneUmiHash(0, umi as u64), 0.0, &mut report));
+        }
+
+        // Build whitelist with only cell 1
+        let mut keep = HashSet::new();
+        keep.insert(1_u64);
+
+        celldata.restrict_to_cells(&keep);
+
+        // Only whitelisted cell remains
+        let keys = celldata.keys();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0], 1_u64);
+
+        assert!(celldata.get(&1_u64).is_some());
+        assert!(celldata.get(&13452355_u64).is_none());
+
+        // Data integrity: the remaining cell still has its original UMIs
+        // gene0: 20, gene3: 10
+        assert_eq!(celldata.get(&1_u64).unwrap().n_umi_4_gene_id(&0), 20);
+        assert_eq!(celldata.get(&1_u64).unwrap().n_umi_4_gene_id(&3), 10);
+
+        // And: after restriction, the passing set at different thresholds behaves as expected
+        let passing_1 = celldata.passing_cell_set_by_umi(1);
+        assert_eq!(passing_1.len(), 1);
+        assert!(passing_1.contains(&1_u64));
+
+        let passing_31 = celldata.passing_cell_set_by_umi(31);
+        assert!(passing_31.is_empty()); // remaining cell has only 30 UMIs
+    }
     
  }
