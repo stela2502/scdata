@@ -621,137 +621,105 @@ impl Scdata{
         println!( "{}",report );
         Ok( report )
     }
-    /// Update the gene names for export to sparse
+
+    /// Update the gene names for export to sparse (multi processor)
     /// returns the count of cells and the count of total gene values
     pub fn update_genes_to_print( &mut self, genes:&IndexedGenes, names:&Vec<String>) -> [usize; 2] {
         
-        let mut entries = 0;
+        let mut entries_total = 0;
 
         self.genes_to_print.clear();
 
         let cell_keys:Vec<u64> = self.keys();
         let chunk_size = cell_keys.len() / self.num_threads +1;
 
-        let gene_data:Vec<(BTreeMap<std::string::String, usize>, usize)> = cell_keys
+        // 1) Precompute requested gene IDs once
+        let requested_ids = genes.ids_for_gene_names(names);
+        let requested_set: HashSet<usize> = requested_ids.iter().copied().collect();
+
+        let per_chunk :Vec<(HashSet<usize>, usize)> = cell_keys
         .par_chunks(chunk_size)
         .map(|chunk| {
             // Your parallel processing logic here...
             let mut names4sparse:  BTreeMap::<String, usize> = BTreeMap::new();
-            let mut n:usize;
-            let mut entry = 0;
-            let gene_ids = genes.ids_for_gene_names( names );
+            let mut used_ids: HashSet<usize> = HashSet::new();
+            let mut entries = 0usize;
             for key in chunk {
                 if let Some(cell_obj) = self.get(key){
                     if self.checked & ! cell_obj.passing{
                         println!("ignoring cell");
                         continue;
                     }
-                    for (id, int_id) in gene_ids.iter().enumerate() {
-                    //for name in names {
-                        n = *cell_obj.total_reads.get( int_id  ).unwrap_or(&0);
-                        if n > 0{
-                            entry +=1;
-                            if ! names4sparse.contains_key ( &names[id] ){
-                                names4sparse.insert( names[id].to_string() , names4sparse.len() + 1 );
-                            } 
+                    // iterate genes present in this cell
+                    for (gid, n) in &cell_obj.total_reads {
+                        if *n > 0 && requested_set.contains(gid) {
+                            used_ids.insert(*gid);
+                            entries += 1;
                         }
                     }
                 }
             }
-            (names4sparse, entry)
+            (used_ids, entries)
         }).collect();
 
-        // Merge gene data from different chunks
-        let mut names4sparse = HashSet::<String>::new();
+        // 3) Merge chunk results
+        let mut used_all: HashSet<usize> = HashSet::new();
+        let mut entries_total = 0usize;
 
-        for (genelist, n) in &gene_data{
-            entries += n;
-            for name in genelist.keys() {
-                names4sparse.insert( name.to_string() );
-            }
+        for (used, n) in &per_chunk {
+            entries_total += n;
+            used_all.extend(used);
         }
 
-        self.genes_to_print = names4sparse.iter().cloned().collect();
-
-
-        /*if genes.max_id  ==0 && ! names.is_empty() {
-            let mut to = 10;
-            if names.len() < 10{
-                to = names.len() -1;
-            }
-            eprintln!( "None of the genes have data:\n{} ...", names[0..to].join( ", " ) );
-        }
-        //else { println!("{} genes requested and {} with data found", names.len(), genes.max_id); }
-        if names.len() != genes.max_id{
-            // better to run this once more - this does somehow not create the same count if more genes are checked for
-            let mut used:Vec<String> = Vec::with_capacity( genes.max_id );
-            for name in genes.names4sparse.keys() {
-                used.push(name.to_string());
-            }
-            return self.update_names_4_sparse(genes, &used );
-        }*/
-        [ self.len(), entries ]
-    }
-
-
-    pub fn mtx_counts(&mut self, genes:&IndexedGenes,  min_count:usize, num_threads: usize ) -> String{
         
-
-        if ! self.checked{
-
-            self.passing= 0;
-
-            //println!("Checking cell for min umi count!");
-
-            // here we should firt check if there is some strange similarity over the cells.
-            // do we have overlapping gene_id umi connections?
-            // should be VERY rare - let's check that!
-
-            // Split keys into chunks and process them in parallel
-            let keys = self.keys();
-            let chunk_size = keys.len() / num_threads +1; // You need to implement num_threads() based on your requirement
-
-            let results: Vec<(u64, bool)>  = keys
-            .par_chunks(chunk_size) 
-            .flat_map(|chunk| {
-                let min_count = min_count;
-
-                let mut ret= Vec::<(u64, bool)>::with_capacity(chunk_size);
-                for key in chunk {
-                    if let Some(cell_obj) = &self.get(key) {
-                        let n = cell_obj.n_umi( );
-                        ret.push( (*key, n >= min_count) );
-                    }
+        // 4) Produce genes_to_print in the same order as `names`
+        //    (so export is stable and predictable)
+        self.genes_to_print = names
+            .iter()
+            .enumerate()
+            .filter_map(|(i, name)| {
+                if used_all.contains(&requested_ids[i]) {
+                    Some(name.clone())
+                } else {
+                    None
                 }
-                ret
             })
             .collect();
 
-            let mut bad_cells = 0;
-            for ( key, passing ) in results{
-                if passing{
-                    if let Some(cell_obj) = self.get_mut(&key) {
-                        cell_obj.passing = passing;
-                    }
-                }else {
-                    bad_cells +=1;
-                }
-            }
+
+        [ self.len(), entries_total ]
+    }
+
+
+    /// fast multi processord data check and report
+    pub fn mtx_counts(&mut self, genes:&IndexedGenes,  min_count:usize, num_threads: usize ) -> String{
+        // New single strategy:
+        // 1) compute pass set (parallel, no mutation)
+        // 2) apply it (retain + mark passing + rebuild derived state)
+        if !self.checked {
+            let total_before = self.len();
+            let pass = self.passing_cell_set_by_umi(min_count);
+            let bad_cells = total_before.saturating_sub(pass.len());
 
             println!("Dropping cell with too little counts (n={bad_cells})");
-            self.keep_only_passing_cells();
 
-            println!("{} cells have passed the cutoff of {} umi counts per cell.\n\n",self.len(), min_count ); 
-            self.checked = true;
+            self.restrict_to_cells(&pass);
 
+            println!(
+                "{} cells have passed the cutoff of {} umi counts per cell.\n\n",
+                self.passing,
+                min_count
+            );
         }
-        
-        let ncell_and_entries = self.update_genes_to_print( genes, &self.genes_to_print.clone() );
+        // Now we only need to return "n_genes n_cells n_entries".
+        // NOTE: update_genes_to_print needs an owned list because it mutably borrows self.
+        let names = self.genes_to_print.clone();
+        let ncell_and_entries = self.update_genes_to_print(genes, &names);
+
+        // keep this consistent with your struct field
         self.passing = ncell_and_entries[0];
 
-        let ret = format!("{} {} {}", &self.genes_to_print.len(), ncell_and_entries[0], ncell_and_entries[1] );
-        //println!("mtx_counts -> final return: mtx_counts: {}", ret );
-        ret
+        format!("{} {} {}", self.genes_to_print.len(), ncell_and_entries[0], ncell_and_entries[1])
     }
 
     pub fn passing_cells( &self) -> usize {
