@@ -296,6 +296,7 @@ impl Scdata{
             report.local_dup += 1;
             false
         } else {
+            report.ok_reads += 1;
             true
         }
     }
@@ -382,6 +383,11 @@ impl Scdata{
         min_count: usize
     ) -> Result<String, String> {
         let rs = Path::new(&file_path).exists();
+
+        if ! self.checked{
+            self.update_genes_to_print( genes, names);
+            self.mtx_counts( genes, min_count, self.num_threads );
+        }
 
         self.update_genes_to_print(genes, names);
 
