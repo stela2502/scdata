@@ -269,7 +269,7 @@ impl CellData{
     }
     
     
-    pub fn to_str(&self, gene_info:&IndexedGenes, names: &Vec<String>, length:usize ) -> String {
+    pub fn to_str(&self, gene_info:&IndexedGenes, names: &Vec<String>, _length:usize ) -> String {
 
         let mut data = Vec::<std::string::String>::with_capacity( names.len()+4 ); 
 

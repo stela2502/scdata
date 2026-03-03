@@ -170,7 +170,7 @@ impl Scdata{
         }
         size
     } 
-
+    #[allow(dead_code)]
     fn get_mut(&mut self, key: &u64) -> Option<&mut CellData> {
         let index = self.to_key(key); // Extracting the first u8 of the u64 key
         self.data[index].get_mut(key)
@@ -431,7 +431,7 @@ impl Scdata{
 
         self.keep_only_passing_cells();
         let gene_ids = genes.ids_for_gene_names(&self.genes_to_print);
-        let i2s = IntToStr::new("AAAA");
+        //let i2s = IntToStr::new("AAAA");
 
         let mut entries = 0;
         let mut cell_id = 0;
@@ -585,7 +585,7 @@ impl Scdata{
 
         let gene_ids = genes.ids_for_gene_names( &self.genes_to_print );
 
-        let i2s = IntToStr::new("AAAA");
+        //let i2s = IntToStr::new("AAAA");
 
         for cell_obj in self.values() {
             if ! cell_obj.passing {
@@ -626,8 +626,6 @@ impl Scdata{
     /// returns the count of cells and the count of total gene values
     pub fn update_genes_to_print( &mut self, genes:&IndexedGenes, names:&Vec<String>) -> [usize; 2] {
         
-        let entries_total = 0;
-
         self.genes_to_print.clear();
 
         let cell_keys:Vec<u64> = self.keys();
@@ -641,7 +639,7 @@ impl Scdata{
         .par_chunks(chunk_size)
         .map(|chunk| {
             // Your parallel processing logic here...
-            let names4sparse:  BTreeMap::<String, usize> = BTreeMap::new();
+            //let names4sparse:  BTreeMap::<String, usize> = BTreeMap::new();
             let mut used_ids: HashSet<usize> = HashSet::new();
             let mut entries = 0usize;
             for key in chunk {
@@ -692,7 +690,7 @@ impl Scdata{
 
 
     /// fast multi processord data check and report
-    pub fn mtx_counts(&mut self, genes:&IndexedGenes,  min_count:usize, num_threads: usize ) -> String{
+    pub fn mtx_counts(&mut self, genes:&IndexedGenes,  min_count:usize, _num_threads: usize ) -> String{
         // New single strategy:
         // 1) compute pass set (parallel, no mutation)
         // 2) apply it (retain + mark passing + rebuild derived state)
