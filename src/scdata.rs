@@ -626,7 +626,7 @@ impl Scdata{
     /// returns the count of cells and the count of total gene values
     pub fn update_genes_to_print( &mut self, genes:&IndexedGenes, names:&Vec<String>) -> [usize; 2] {
         
-        let mut entries_total = 0;
+        let entries_total = 0;
 
         self.genes_to_print.clear();
 
@@ -641,7 +641,7 @@ impl Scdata{
         .par_chunks(chunk_size)
         .map(|chunk| {
             // Your parallel processing logic here...
-            let mut names4sparse:  BTreeMap::<String, usize> = BTreeMap::new();
+            let names4sparse:  BTreeMap::<String, usize> = BTreeMap::new();
             let mut used_ids: HashSet<usize> = HashSet::new();
             let mut entries = 0usize;
             for key in chunk {
@@ -782,7 +782,7 @@ impl Scdata{
         let reader_mtx = BufReader::new(GzDecoder::new(BufReader::new(file)));
 
 
-        let mut lines = reader_mtx.lines();
+        let lines = reader_mtx.lines();
         let mut dims = false;
         let mut header = false;
 

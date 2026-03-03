@@ -8,9 +8,9 @@ mod tests {
     use std::collections::BTreeMap;
     use std::fs;
     use std::path::PathBuf;
-    use flate2::bufread::GzDecoder;
-    use std::io::BufReader;
-    use std::io::BufRead;
+    
+    
+    
     use scdata::scdata::MatrixValueType;
 
 	static EMPTY_VEC: Vec<String> = Vec::new();
