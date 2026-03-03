@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 flate2 = "1.1.2"
 int_to_str = { git="https://github.com/stela2502/int_to_str.git"}
-mapping_info = { git="https://github.com/stela2502/mapping_info.git" }
+mapping_info = { git = "https://github.com/stela2502/mapping_info.git", rev = "3e00152648d54de943288ac1ca877cf15f3672e7" }
 rayon = "1.10.0"
 regex = "1.11.1"
 
