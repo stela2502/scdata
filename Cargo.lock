@@ -213,11 +213,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "int_to_str"
-version = "0.1.0"
-source = "git+https://github.com/stela2502/int_to_str.git#b7bf33e03ba24c3c44cdfe8feef5239d433278a6"
-
-[[package]]
 name = "itoa"
 version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -248,7 +243,8 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 [[package]]
 name = "mapping_info"
 version = "0.1.0"
-source = "git+https://github.com/stela2502/mapping_info.git#3e00152648d54de943288ac1ca877cf15f3672e7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27075f46874b6f948e70bea35f58ff3e1d6584c1b9e05852db66f001d6579869"
 dependencies = [
  "atty",
  "chrono",
@@ -381,10 +377,10 @@ name = "scdata"
 version = "0.1.0"
 dependencies = [
  "flate2",
- "int_to_str",
  "mapping_info",
  "rayon",
  "regex",
+ "stela-int-to-str",
 ]
 
 [[package]]
@@ -398,6 +394,12 @@ name = "simd-adler32"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e320a6c5ad31d271ad523dcf3ad13e2767ad8b1cb8f047f75a8aeaf8da139da2"
+
+[[package]]
+name = "stela-int-to-str"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8c6a3ffb93f5c30b2376aa45c5ec3a76db1f16e6b60b5e242ad38c0d4ae411f"
 
 [[package]]
 name = "syn"
