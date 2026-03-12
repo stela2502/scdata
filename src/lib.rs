@@ -1,4 +1,4 @@
-// /Scdata/mod.rs
+// src/lib.rs
 
 
 pub mod indexed_genes;
