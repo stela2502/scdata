@@ -1,4 +1,4 @@
-// Scdata/cell_data/mod.rs
+// src/cell_data/mod.rs
 
 pub mod cell_data;
 pub mod gene_umi_hash;

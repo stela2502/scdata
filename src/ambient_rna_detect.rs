@@ -39,6 +39,13 @@ impl AmbientRnaDetect{
 		*counts
 	}
 
+	pub fn add_value( &mut self, data:GeneUmiHash, value: f32) -> usize  {
+
+		let counts = self.ambient.entry(data).or_insert(0);
+		*counts += value as usize;
+		*counts
+	}
+
 	pub fn finalize( &mut self, counts:usize ) {
 
 		if self.checked{

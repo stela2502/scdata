@@ -1,39 +1,43 @@
-use std::collections::BTreeMap;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use std::collections::hash_map::DefaultHasher;
-use crate::cell_data::GeneUmiHash;
 use crate::ambient_rna_detect::AmbientRnaDetect;
+use crate::cell_data::GeneUmiHash;
+use crate::feature_index::FeatureIndex;
 
-use std::hash::Hash;
-use std::hash::Hasher;
-
-//use crate::geneids::GeneIds;
-use crate::IndexedGenes;
 use core::fmt;
 use int_to_str::int_to_str::IntToStr;
 
-
-/// CellData here is a storage for the total UMIs. UMIs will be checked per cell
-/// But I do not correct the UMIs here - even with sequencing errors 
-/// we should get a relatively correct picture as these folow normal distribution.
-#[derive(Default)]
-pub struct CellData{
-    //pub kmer_size: usize,
-    pub name: u64,
-    pub genes: BTreeMap<GeneUmiHash, f32>, // I want to know how many times I got the same UMI
-    pub genes_with_data: HashSet<String>, // when exporting genes it is helpfule to know which of the possible genomic genes actually have an expression reported...
-    pub total_reads: BTreeMap<usize, usize>, // instead of the per umi counting
-    //pub cell_counts: BTreeMap<usize, usize>,
-    pub passing: bool, // check if this cell is worth exporting. Late game
-    pub total_umis:usize, // brute force adding all different gene types together to speed cell subsetting up
-    // Some sequences do not uniquely map to only one gene
-    // I want to make sure I find a good way to deal with this problem.
-    // I hope that some reads would also map to one of the genes uniquely.
-    // This way we could easily add this data there
-    pub multimapper: BTreeMap<u64, (HashSet<u64>, Vec<usize>) >,
+/// Struct describing multimapping reads.
+#[derive(Clone, Debug, Default)]
+pub struct MultiMapper {
+    pub features: HashSet<u64>,
+    pub positions: Vec<usize>,
 }
 
+/// Cell-local feature store in a global feature space.
+///
+/// Logic:
+/// - `seen` is the registry of already observed `(feature_id, umi)` pairs
+/// - `total_reads` stores the accumulated per-feature value
+/// - duplicate `(feature_id, umi)` pairs are rejected
+#[derive(Clone, Debug, Default)]
+pub struct CellData {
+    pub name: u64,
+
+    /// Registry of already seen feature_id + umi pairs.
+    pub seen: HashSet<GeneUmiHash>,
+
+    /// feature_id -> accumulated value / count
+    pub total_reads: HashMap<u64, f32>,
+
+    pub passing: bool,
+
+    /// Total number of unique feature/UMI observations.
+    pub total_umis: usize,
+
+    /// Multimapped sequences.
+    pub multimapper: HashMap<u64, MultiMapper>,
+}
 
 impl fmt::Display for CellData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -42,29 +46,24 @@ impl fmt::Display for CellData {
         writeln!(f, "Cell Name (ID): {}", self.name)?;
         writeln!(f, "Passing Filter: {}", self.passing)?;
         writeln!(f, "Total UMIs: {}", self.total_umis)?;
-        writeln!(f, "Number of Genes with UMIs: {}", self.genes.len())?;
+        writeln!(f, "Seen Feature/UMI Pairs: {}", self.seen.len())?;
 
-        writeln!(f, "\nGenes with Data ({}):", self.genes_with_data.len())?;
-        for gene in &self.genes_with_data {
-            writeln!(f, "  - {}", gene)?;
+        writeln!(f, "\nPer-Feature Totals:")?;
+        for (feature_id, count) in &self.total_reads {
+            writeln!(f, "  {} => {}", feature_id, count)?;
         }
 
-        writeln!(f, "\nTotal Read per Gene Length:")?;
-        for (length, count) in &self.total_reads {
-            writeln!(f, "  {} bp: {}", length, count)?;
-        }
-
-        writeln!(f, "\nGene UMI Counts:")?;
-        for (key, val) in &self.genes {
-            writeln!(f, "  {:?} => {:.2}", key, val)?; // fallback to Debug if no Display
+        writeln!(f, "\nSeen Feature/UMI Registry:")?;
+        for key in &self.seen {
+            writeln!(f, "  {:?}", key)?;
         }
 
         writeln!(f, "\nMultimappers ({} entries):", self.multimapper.len())?;
-        for (seq_id, (gene_ids, positions)) in &self.multimapper {
+        for (seq_id, mm) in &self.multimapper {
             writeln!(
                 f,
-                "  Seq {}: Genes {:?}, Positions {:?}",
-                seq_id, gene_ids, positions
+                "  Seq {}: Features {:?}, Positions {:?}",
+                seq_id, mm.features, mm.positions
             )?;
         }
 
@@ -72,241 +71,301 @@ impl fmt::Display for CellData {
     }
 }
 
-
-impl CellData{
-    pub fn new(  name: u64 ) -> Self{
-        let genes =  BTreeMap::new(); // to collect the sample counts
-        let total_reads = BTreeMap::new();
-        let genes_with_data = HashSet::new();
-        let passing = false;
-        let total_umis = 0;
-        let multimapper = BTreeMap::new();
-        Self{
+impl CellData {
+    /// Create an empty cell container.
+    pub fn new(name: u64) -> Self {
+        Self {
             name,
-            genes,
-            genes_with_data,
-            total_reads,
-            passing,
-            total_umis,
-            multimapper,
+            ..Default::default()
         }
     }
 
-    pub fn split_ambient( &self, ambient:&AmbientRnaDetect ) -> (Self, Self){
-        let mut non_ambient_data = Self::new(self.name);
+    /// Split this cell into ambient and non-ambient fractions.
+    ///
+    /// The decision is made per seen feature/UMI observation.
+    pub fn split_ambient(&self, ambient: &AmbientRnaDetect) -> (Self, Self) {
+        let mut non_ambient = Self::new(self.name);
         let mut ambient_data = Self::new(self.name);
 
-        for (gene_hash, count) in &self.genes {
-            if ambient.is_ambient(gene_hash) {
-                ambient_data.add_count(*gene_hash, *count);
+        for gh in &self.seen {
+            if ambient.is_ambient(gh) {
+                ambient_data.add(*gh);
             } else {
-                non_ambient_data.add_count(*gene_hash, *count);
+                non_ambient.add(*gh);
             }
         }
-        non_ambient_data.passing = true;
+
+        non_ambient.passing = true;
         ambient_data.passing = true;
-        (non_ambient_data, ambient_data)
+
+        (non_ambient, ambient_data)
     }
 
-    fn _hash_classes(vals: &Vec<usize> ) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        for val in vals {
-            val.hash(&mut hasher);
-        }
-        // Finalize and return the hash value
-        hasher.finish()
-    }
-
-    pub fn deep_clone(&self) -> CellData {
-        let cloned_genes: BTreeMap<GeneUmiHash , f32> = self
-            .genes
-            .iter()
-            .map(|(k, v)| (*k, *v)) // Clone each HashSet within the BTreeMap
-            .collect();
-
-        let cloned_genes_with_data: HashSet<String> = self.genes_with_data.clone();
-
-        let cloned_total_reads: BTreeMap<usize, usize> = self.total_reads.clone();
-
-        let cloned_multimapper:  BTreeMap<u64, (HashSet<u64>, Vec<usize>) > = self.multimapper.clone();
-
-        CellData {
-            name: self.name,
-            genes: cloned_genes,
-            genes_with_data: cloned_genes_with_data,
-            total_reads: cloned_total_reads,
-            passing: self.passing,
-            total_umis: self.total_umis,
-            multimapper: cloned_multimapper,
-        }
-    }
-
-    /// adds the other values into this object
+    /// Merge another cell into this one.
+    ///
+    /// Only previously unseen `(feature_id, umi)` pairs are inserted.
     pub fn merge(&mut self, other: &CellData) {
-        for (gene_umi_combo, value) in &other.genes {
-            if self.genes.contains_key(gene_umi_combo) {
-                // Warn once per duplicate
+        for gh in &other.seen {
+            if !self.seen.insert(*gh) {
                 #[cfg(debug_assertions)]
                 eprintln!(
                     "Warning: duplicate GeneUmiHash {:?} found during merge for cell {}",
-                    gene_umi_combo,
-                    self.name
+                    gh, self.name
                 );
                 continue;
             }
 
-            self.genes.insert(*gene_umi_combo, *value);
-            *self.total_reads.entry(gene_umi_combo.0).or_insert(0) += 1;
-            self.total_umis += 1;
+            *self.total_reads.entry(gh.0).or_insert(0.0) += 1.0;
         }
     }
 
-    /// adds the other values into this object
-    /// The other genes is the position of the gene in index2 translated to the merged index
-    pub fn merge_re_id_genes(&mut self, other: &CellData, other_genes: &Vec::<usize> ) {
-        self.total_umis += other.total_umis;
-
-        for (gene_umi_combo, counts) in &other.genes {
-            // re-id the UMI count touple
-            let re_ided_umi_combo= GeneUmiHash( 
-                other_genes[gene_umi_combo.0],
-                gene_umi_combo.1
-            );
-            let _ = self.add( re_ided_umi_combo, *counts );
-            /*
-            if ! self.add( re_ided_umi_combo ){
-                // This combination has already been recorded!
-                println!("Already present: {:?}", re_ided_umi_combo);
-            }else {
-                println!("NEW: {:?}, counts: {}", re_ided_umi_combo, counts);
-            }
-            */
-        }
-
-    }
-
-
-    /// Adds a gene/umi combo with a signal value.
-    /// Returns `true` if inserted, `false` if a duplicate was detected and ignored.
-    pub fn add(&mut self, gh: GeneUmiHash, value: f32) -> bool {
-        if self.genes.contains_key(&gh) {
+    /// Insert one unique feature/UMI observation.
+    ///
+    /// Returns `false` if this exact feature/UMI pair was already seen.
+    pub fn add(&mut self, fh: GeneUmiHash) -> bool {
+        if !self.seen.insert(fh) {
             #[cfg(debug_assertions)]
             eprintln!(
                 "Warning: duplicate GeneUmiHash {:?} detected in cell {} — ignoring.",
-                gh,
-                self.name
+                fh, self.name
             );
             return false;
         }
 
-        self.genes.insert(gh, value);
-        *self.total_reads.entry(gh.0).or_insert(0) += 1;
-        self.total_umis += 1;
+        *self.total_reads.entry(fh.0).or_insert(0.0) += 1.0;
         true
     }
 
-    // returns false if the gene/umi combo has already been recorded!
-    pub fn add_count(&mut self, gh: GeneUmiHash, count:f32 ) -> bool{
-        //println!("adding gene id {}", geneid );
-        return match self.genes.get_mut( &gh ) {
-            Some( gene ) => {
-                *gene += count;
-                false
-            }, 
-            None => {
-                self.genes.insert(gh, count);
-                let counts = self.total_reads.entry( gh.0 ).or_insert_with(|| 0);
-                *counts +=1;
-                self.total_umis += 1;
-                true
-            }
-        }
-    }
-
-    /// n_umi gets all umis stored for one cell
-    pub fn n_umi( &self ) -> usize {
-        self.total_umis
-    }
-
-    /// This is used to calculate the subset specific umi counts after the
-    /// crap cells have been discarded - definitely necessary to get it gene specific!
-    pub fn n_reads( &self, gene_info:&IndexedGenes, gnames: &Vec<String> ) -> usize {
-        //println!("I got {} umis for cell {}", n, self.name );
-        //return self.total_umis;
-        let mut n = 0;
-        let gene_ids = gene_info.ids_for_gene_names( gnames );
-        for id in gene_ids{
-            n += match self.total_reads.get( &id  ){
-                Some( count ) => {
-                    *count
-                },
-                None => 0
-            };
-        }
-        n
-    }
-
-    pub fn n_umi_4_gene_id( &self, gene_id:&usize ) -> usize{
-        *self.total_reads.get( gene_id ).unwrap_or(&0)
-    }
-
-    pub fn get_mean_for_gene(&self, gene_id: &usize) -> Option<f32> {
-        let mut sum = 0.0;
-        let mut count = 0;
-
-        for (key, value) in self.genes.iter() {
-            if key.0 == *gene_id {
-                sum += value;
-                count += 1;
-            }
+    /// Insert one unique feature/UMI observation with a numeric value.
+    ///
+    /// Duplicate feature/UMI pairs are rejected.
+    pub fn add_value(&mut self, fh: GeneUmiHash, value: f32) -> bool {
+        if !self.seen.insert(fh) {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "Warning: duplicate GeneUmiHash {:?} detected in cell {} — ignoring value insert.",
+                fh, self.name
+            );
+            return false;
         }
 
-        if count > 0 {
-            Some(sum / count as f32)
+        *self.total_reads.entry(fh.0).or_insert(0.0) += value;
+        true
+    }
+
+    /// Number of unique feature/UMI observations in this cell.
+    pub fn n_umi(&self) -> usize {
+        self.seen.len()
+    }    
+
+
+    /// Accumulated value for one feature id.
+    pub fn n_umi_4_gene_id(&self, feature_id: &u64) -> f32 {
+        *self.total_reads.get(feature_id).unwrap_or(&0.0)
+    }    
+
+    /// Mean value helper.
+    ///
+    /// In the current model this is just the total feature value divided
+    /// by the number of unique UMIs seen for that feature.
+    pub fn get_mean_for_gene(&self, feature_id: &u64) -> Option<f32> {
+        let total = *self.total_reads.get(feature_id)?;
+        let n = self.seen.iter().filter(|gh| gh.0 == *feature_id).count();
+
+        if n > 0 {
+            Some(total / n as f32)
         } else {
             None
         }
     }
-    
-    
-    pub fn to_str(&self, gene_info:&IndexedGenes, names: &Vec<String>, length:usize ) -> String {
 
-        let mut data = Vec::<std::string::String>::with_capacity( names.len()+4 ); 
+    /*
+    /// Total accumulated value across selected feature names.
+    pub fn n_reads<I: FeatureIndex>(&self, feature_index: &I, names: &[String]) -> f32 {
+        let mut n = 0.0;
 
+        let feature_ids = feature_index.ids_for_feature_names(names);
 
-        data.push(format!( "{}", IntToStr::u8_array_to_str( &self.name.to_le_bytes() ) ) );
-
-        // here our internal data already should be stored with the same ids as the gene names.
-        let mut total = 0;
-        let mut max = 0;
-        let mut max_name:std::string::String = "na".to_string();
-
-        let gene_ids = gene_info.ids_for_gene_names( names );
-        let mut dist2max = usize::MAX;
-        for (i, id) in gene_ids.iter().enumerate(){
-            let n = *self.total_reads.get( id  ).unwrap_or(&0);
-            //println!("I collected expression for gene {}: n={}", name, n);
-            if max < n {
-                max_name = names[i].to_string();
-                max = n;
-            }
-            data.push( n.to_string() );
-            total += n;
-        }
-        for id in gene_ids{
-            let n = *self.total_reads.get( &id  ).unwrap_or(&0);
-            if (dist2max > max - n) & (max - n != 0) {
-                dist2max = max - n;
-                //println!("setting dist2max to new max: {dist2max} ( {max} - {n}");
-            }
+        for id in feature_ids {
+            n += *self.total_reads.get(&id).unwrap_or(&0.0);
         }
 
-        data.push( max_name ); // max expressing gene (or sample id in an HTO analysis)
-        data.push( (max as f32 / total as f32 ).to_string()); // fraction of reads for the max gene
-        data.push( ( total ).to_string());
-        data.push( (dist2max as f32 / max as f32 ).to_string()); // percent max reads distance to nr.2
-        //println!("This should print one LINE here: {data:?}",);
-        data.join( "\t" )
+        n
     }
 
+
+
+
+    */
+
+    /// Dense row export helper.
+    pub fn to_str_for_feature_ids(
+        &self,
+        feature_ids: &[u64],
+        _length: usize,
+    ) -> String {
+        let mut data = Vec::<String>::with_capacity(feature_ids.len() + 4);
+
+        data.push(IntToStr::u8_array_to_str(&self.name.to_le_bytes()).to_string());
+
+        let mut total = 0.0f32;
+        let mut max = 0.0f32;
+        let mut max_id: Option<u64> = None;
+
+        for id in feature_ids {
+            let n = *self.total_reads.get(id).unwrap_or(&0.0);
+
+            if n > max {
+                max = n;
+                max_id = Some(*id);
+            }
+
+            data.push(n.to_string());
+            total += n;
+        }
+
+        let mut dist2max = f32::MAX;
+        for id in feature_ids {
+            let n = *self.total_reads.get(id).unwrap_or(&0.0);
+            let diff = max - n;
+
+            if diff > 0.0 && diff < dist2max {
+                dist2max = diff;
+            }
+        }
+
+        data.push(
+            max_id
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "na".to_string()),
+        );
+
+        data.push(if total > 0.0 {
+            (max / total).to_string()
+        } else {
+            "0".to_string()
+        });
+
+        data.push(total.to_string());
+
+        data.push(if max > 0.0 && dist2max.is_finite() {
+            (dist2max / max).to_string()
+        } else {
+            "0".to_string()
+        });
+
+        data.join("\t")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cell_data::GeneUmiHash;
+
+    #[test]
+    fn test_new_cell() {
+        let cell = CellData::new(42);
+
+        assert_eq!(cell.name, 42);
+        assert_eq!(cell.total_umis, 0);
+        assert!(cell.seen.is_empty());
+        assert!(cell.total_reads.is_empty());
+    }
+
+    #[test]
+    fn test_add_unique_feature_umi() {
+        let mut cell = CellData::new(1);
+
+        let fh = GeneUmiHash(10, 123);
+        let inserted = cell.add(fh);
+
+        assert!(inserted);
+        assert_eq!(cell.total_umis, 1);
+        assert!(cell.seen.contains(&fh));
+        assert_eq!(cell.total_reads.get(&10), Some(&1.0));
+    }
+
+    #[test]
+    fn test_add_duplicate_rejected() {
+        let mut cell = CellData::new(1);
+
+        let fh = GeneUmiHash(10, 123);
+
+        assert!(cell.add(fh));
+        assert!(!cell.add(fh));
+
+        assert_eq!(cell.total_umis, 1);
+        assert_eq!(cell.total_reads.get(&10), Some(&1.0));
+    }
+
+    #[test]
+    fn test_add_value_new_only() {
+        let mut cell = CellData::new(1);
+
+        let fh = GeneUmiHash(5, 111);
+
+        assert!(cell.add_value(fh, 2.0));
+        assert!(!cell.add_value(fh, 3.0));
+
+        assert!(cell.seen.contains(&fh));
+        assert_eq!(cell.total_reads.get(&5), Some(&2.0));
+        assert_eq!(cell.total_umis, 1);
+    }
+
+    #[test]
+    fn test_n_umi() {
+        let mut cell = CellData::new(1);
+
+        cell.add(GeneUmiHash(1, 10));
+        cell.add(GeneUmiHash(1, 11));
+        cell.add(GeneUmiHash(2, 12));
+
+        assert_eq!(cell.n_umi(), 3);
+    }
+
+    #[test]
+    fn test_merge_cells() {
+        let mut a = CellData::new(1);
+        let mut b = CellData::new(1);
+
+        let fh1 = GeneUmiHash(1, 10);
+        let fh2 = GeneUmiHash(2, 20);
+
+        a.add(fh1);
+        b.add(fh2);
+
+        a.merge(&b);
+
+        assert_eq!(a.total_umis, 2);
+        assert!(a.seen.contains(&fh1));
+        assert!(a.seen.contains(&fh2));
+        assert_eq!(a.total_reads.get(&1), Some(&1.0));
+        assert_eq!(a.total_reads.get(&2), Some(&1.0));
+    }
+
+    #[test]
+    fn test_n_umi_for_feature() {
+        let mut cell = CellData::new(1);
+
+        cell.add(GeneUmiHash(5, 1));
+        cell.add(GeneUmiHash(5, 2));
+        cell.add(GeneUmiHash(3, 1));
+
+        assert_eq!(cell.n_umi_4_gene_id(&5), 2.0);
+        assert_eq!(cell.n_umi_4_gene_id(&3), 1.0);
+        assert_eq!(cell.n_umi_4_gene_id(&9), 0.0);
+    }
+
+    #[test]
+    fn test_mean_for_feature() {
+        let mut cell = CellData::new(1);
+
+        cell.add_value(GeneUmiHash(1, 1), 2.0);
+        cell.add_value(GeneUmiHash(1, 2), 4.0);
+
+        let mean = cell.get_mean_for_gene(&1).unwrap();
+
+        assert!((mean - 3.0).abs() < 1e-6);
+    }
 }
