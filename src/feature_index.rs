@@ -48,7 +48,6 @@
 /// assert_eq!(index.feature_id("GeneA"), Some(0));
 /// assert_eq!(index.feature_name(1), "GeneB");
 /// ```
-
 pub trait FeatureIndex: Send + Sync {
     /// name to id translation
     fn feature_name(&self, feature_id: u64) -> &str;

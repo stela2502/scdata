@@ -36,7 +36,6 @@ pub struct Scdata {
     pub(crate) value_type: MatrixValueType,
 }
 
-
 /// Sparse single-cell UMI count store.
 ///
 /// # Example
@@ -98,7 +97,6 @@ pub struct Scdata {
 ///
 /// assert_eq!(data.passing_cells(), 1);
 /// ```
-
 impl Default for Scdata {
     /// Create an integer-valued matrix with one default worker thread.
     fn default() -> Self {
@@ -190,7 +188,6 @@ impl Scdata {
     pub fn len(&self) -> usize {
         self.data.iter().map(|m| m.len()).sum()
     }
-
 
     /// Get read-only access to one cell by id.
     pub fn get(&self, key: &u64) -> Option<&CellData> {
@@ -334,7 +331,9 @@ impl Scdata {
             .flat_map(|chunk| {
                 let mut keep = Vec::<u64>::with_capacity(chunk.len());
                 for key in chunk {
-                    if let Some(cell) = self.get(key) && cell.total_umis() >= min_count {
+                    if let Some(cell) = self.get(key)
+                        && cell.total_umis() >= min_count
+                    {
                         keep.push(*key);
                     }
                 }
