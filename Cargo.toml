@@ -3,6 +3,18 @@ name = "scdata"
 version = "0.2.0"
 edition = "2024"
 
+description = "High-performance Rust library for constructing sparse single-cell UMI count data with deterministic MatrixMarket export"
+
+license = "MIT"
+
+documentation = "https://docs.rs/scdata"
+repository = "https://github.com/stela2502/scdata"
+homepage = "https://github.com/stela2502/scdata"
+readme = "README.md"
+
+keywords = ["single-cell", "bioinformatics", "umi", "sparse", "rna-seq"]
+categories = ["science", "data-structures"]
+
 [dependencies]
 flate2 = "1.1.2"
 int_to_str = { git="https://github.com/stela2502/int_to_str.git"}

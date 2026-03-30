@@ -105,7 +105,6 @@ mod matrix_value_type_tests {
         assert_eq!(ty.format_matrix_market_value(0.0).unwrap(), "0");
     }
 
-
     #[test]
     fn reject_fractional_value_for_integer_matrix() {
         let ty = MatrixValueType::Integer;
@@ -125,7 +124,6 @@ mod matrix_value_type_tests {
         let ty = MatrixValueType::Real;
         assert_eq!(ty.format_matrix_market_value(2.5).unwrap(), "2.5");
     }
-
 
     #[test]
     fn reject_non_finite_for_real_matrix() {

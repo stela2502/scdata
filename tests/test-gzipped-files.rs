@@ -1,7 +1,7 @@
 // test-gzipped-files.rs
 use flate2::read::GzDecoder;
-use scdata::{FeatureIndex, GeneUmiHash, MatrixValueType, Scdata};
 use mapping_info::MappingInfo;
+use scdata::{FeatureIndex, GeneUmiHash, MatrixValueType, Scdata};
 
 use std::collections::HashMap;
 use std::fs;
@@ -60,8 +60,8 @@ fn test_out_dir(name: &str) -> PathBuf {
 }
 
 fn read_gz_to_string(path: &PathBuf) -> String {
-    let file = File::open(path)
-        .unwrap_or_else(|e| panic!("failed to open {}: {e}", path.display()));
+    let file =
+        File::open(path).unwrap_or_else(|e| panic!("failed to open {}: {e}", path.display()));
     let mut decoder = GzDecoder::new(file);
     let mut text = String::new();
     decoder

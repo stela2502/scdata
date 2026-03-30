@@ -7,7 +7,7 @@ use mapping_info::MappingInfo;
 
 use crate::cell_data::CellData;
 use crate::cell_data::GeneUmiHash;
-use crate::{MatrixValueType, FeatureIndex};
+use crate::{FeatureIndex, MatrixValueType};
 
 /// Sparse single-cell count store.
 ///
@@ -35,6 +35,69 @@ pub struct Scdata {
     /// Numeric matrix value type.
     pub(crate) value_type: MatrixValueType,
 }
+
+
+/// Sparse single-cell UMI count store.
+///
+/// # Example
+///
+/// ```no_run
+/// use std::collections::HashMap;
+/// use mapping_info::MappingInfo;
+/// use std::path::PathBuf;
+/// use scdata::{FeatureIndex, GeneUmiHash, MatrixValueType, Scdata};
+///
+/// struct SimpleIndex {
+///     names: Vec<String>,
+///     ids: HashMap<String, u64>,
+/// }
+///
+/// impl SimpleIndex {
+///     fn new(names: Vec<&str>) -> Self {
+///         let names: Vec<String> = names.into_iter().map(|s| s.to_string()).collect();
+///         let ids = names
+///             .iter()
+///             .enumerate()
+///             .map(|(i, n)| (n.clone(), i as u64))
+///             .collect();
+///         Self { names, ids }
+///     }
+/// }
+///
+/// impl FeatureIndex for SimpleIndex {
+///     fn feature_name(&self, feature_id: u64) -> &str {
+///         &self.names[feature_id as usize]
+///     }
+///
+///     fn feature_id(&self, name: &str) -> Option<u64> {
+///         self.ids.get(name).copied()
+///     }
+///
+///     fn ordered_feature_ids(&self) -> Vec<u64> {
+///         (0..self.names.len() as u64).collect()
+///     }
+///
+///     fn to_10x_feature_line(&self, feature_id: u64) -> String {
+///         let name = self.feature_name(feature_id);
+///         format!("{name}\t{name}\tGene Expression")
+///     }
+/// }
+///
+/// let mut data = Scdata::new(1, MatrixValueType::Integer);
+/// let mut report = MappingInfo::new(None, 0.0, 0);
+/// let index = SimpleIndex::new(vec!["GeneA", "GeneB"]);
+///
+/// let gene_a = index.feature_id("GeneA").unwrap();
+///
+/// data.try_insert(&1_u64, GeneUmiHash(gene_a, 100), 0.0, &mut report);
+/// data.try_insert(&1_u64, GeneUmiHash(gene_a, 101), 0.0, &mut report);
+///
+/// data.finalize_for_export(0, &index);
+/// let out = PathBuf::from("example_sparse_out");
+/// let _ = data.write_sparse(&out, &index);
+///
+/// assert_eq!(data.passing_cells(), 1);
+/// ```
 
 impl Default for Scdata {
     /// Create an integer-valued matrix with one default worker thread.
@@ -128,11 +191,6 @@ impl Scdata {
         self.data.iter().map(|m| m.len()).sum()
     }
 
-    /// Get mutable access to one cell by id.
-    fn get_mut(&mut self, key: &u64) -> Option<&mut CellData> {
-        let index = self.to_key(key);
-        self.data[index].get_mut(key)
-    }
 
     /// Get read-only access to one cell by id.
     pub fn get(&self, key: &u64) -> Option<&CellData> {
@@ -238,9 +296,7 @@ impl Scdata {
 
     pub(crate) fn check_sparse_export_ready(&self) -> Result<(), String> {
         if !self.checked {
-            return Err(
-                "Sparse export requires finalize_for_export(...) first.".to_string(),
-            );
+            return Err("Sparse export requires finalize_for_export(...) first.".to_string());
         }
 
         if self.export_cell_ids.is_empty() {
@@ -249,7 +305,6 @@ impl Scdata {
 
         Ok(())
     }
-
 
     /// Return the number of cells currently selected for export.
     pub fn passing_cells(&self) -> usize {
@@ -279,10 +334,8 @@ impl Scdata {
             .flat_map(|chunk| {
                 let mut keep = Vec::<u64>::with_capacity(chunk.len());
                 for key in chunk {
-                    if let Some(cell) = self.get(key) {
-                        if cell.total_umis() >= min_count {
-                            keep.push(*key);
-                        }
+                    if let Some(cell) = self.get(key) && cell.total_umis() >= min_count {
+                        keep.push(*key);
                     }
                 }
                 keep
@@ -297,7 +350,7 @@ impl Scdata {
     /// The feature id cache is collected from the per-cell `total_reads` keys.
     /// The total number of exported sparse entries is the sum of
     /// `cell.total_reads.len()` across all retained cells.
-    fn rebuild_feature_ids_with_data<I: FeatureIndex>(&mut self, index: &I,) {
+    fn rebuild_feature_ids_with_data<I: FeatureIndex>(&mut self, index: &I) {
         let (observed_feature_ids, total_entries) = self
             .data
             .par_iter()
@@ -357,13 +410,12 @@ impl Scdata {
     /// This applies the UMI cutoff, retains only passing cells,
     /// establishes deterministic export order, rebuilds export caches,
     /// and marks the object as checked.
-    pub fn finalize_for_export<I: FeatureIndex>(&mut self, min_total_umis: usize, index: &I,) {
+    pub fn finalize_for_export<I: FeatureIndex>(&mut self, min_total_umis: usize, index: &I) {
         let keep = self.passing_cell_set_by_umi(min_total_umis);
         self.restrict_to_cells(&keep);
         self.rebuild_feature_ids_with_data(index);
         self.checked = true;
     }
-
 
     /// Return the ordered export cell ids.
     pub fn export_cell_ids(&self) -> &[u64] {

@@ -1,5 +1,5 @@
-use scdata::{FeatureIndex, GeneUmiHash, MatrixValueType, Scdata};
 use mapping_info::MappingInfo;
+use scdata::{FeatureIndex, GeneUmiHash, MatrixValueType, Scdata};
 
 use std::collections::HashMap;
 use std::fs;
@@ -31,8 +31,6 @@ impl TestFeatureIndex {
             .get(name)
             .unwrap_or_else(|| panic!("unknown feature name: {name}"))
     }
-
-
 }
 
 impl FeatureIndex for TestFeatureIndex {
@@ -72,7 +70,7 @@ fn singlecelldata_to_sparse_integer_roundtrip() {
         celldata.try_insert_value(&1_u64, GeneUmiHash(gene1, 0), 20.0, &mut report),
         "insert Gene1 umi 0"
     );
-    
+
     assert!(
         !celldata.try_insert_value(&1_u64, GeneUmiHash(gene1, 0), 1.0, &mut report),
         "duplicate Gene1 umi 0 should fail"
@@ -83,34 +81,18 @@ fn singlecelldata_to_sparse_integer_roundtrip() {
         "insert Gene4 umi 0"
     );
 
-
     // Cell 2: Gene3 x30, Gene1 x20
     assert!(
-        celldata.try_insert_value(
-            &13_452_355_u64,
-            GeneUmiHash(gene3, 0),
-            30.0,
-            &mut report
-        ),
+        celldata.try_insert_value(&13_452_355_u64, GeneUmiHash(gene3, 0), 30.0, &mut report),
         "insert Gene3 umi 0"
     );
     assert!(
-        celldata.try_insert_value(
-            &13_452_355_u64,
-            GeneUmiHash(gene1, 0),
-            20.0,
-            &mut report
-        ),
+        celldata.try_insert_value(&13_452_355_u64, GeneUmiHash(gene1, 0), 20.0, &mut report),
         "insert Gene1 umi 0"
     );
 
     assert!(
-        !celldata.try_insert(
-            &13_452_355_u64,
-            GeneUmiHash(gene1, 0),
-            1.0,
-            &mut report
-        ),
+        !celldata.try_insert(&13_452_355_u64, GeneUmiHash(gene1, 0), 1.0, &mut report),
         "duplicate Gene1 umi 0 should fail"
     );
 
@@ -120,7 +102,10 @@ fn singlecelldata_to_sparse_integer_roundtrip() {
     }
     celldata.finalize_for_export(0, &feature_index);
     let write_result = celldata.write_sparse(&out_dir, &feature_index);
-    assert!(write_result.is_ok(), "write_sparse failed: {write_result:?}");
+    assert!(
+        write_result.is_ok(),
+        "write_sparse failed: {write_result:?}"
+    );
 
     let matrix_path = out_dir.join("matrix.mtx.gz");
     let features_path = out_dir.join("features.tsv.gz");
@@ -137,24 +122,15 @@ fn singlecelldata_to_sparse_integer_roundtrip() {
 
     // Cell 1: Gene1 x20, Gene4 x10
     assert_eq!(
-        scdata2
-            .get(&1_u64)
-            .unwrap()
-            .total_umis_4_gene_id(&gene1),
+        scdata2.get(&1_u64).unwrap().total_umis_4_gene_id(&gene1),
         20.0
     );
     assert_eq!(
-        scdata2
-            .get(&1_u64)
-            .unwrap()
-            .total_umis_4_gene_id(&gene3),
+        scdata2.get(&1_u64).unwrap().total_umis_4_gene_id(&gene3),
         0.0
     );
     assert_eq!(
-        scdata2
-            .get(&1_u64)
-            .unwrap()
-            .total_umis_4_gene_id(&gene4),
+        scdata2.get(&1_u64).unwrap().total_umis_4_gene_id(&gene4),
         10.0
     );
 
@@ -182,7 +158,6 @@ fn singlecelldata_to_sparse_integer_roundtrip() {
     );
 }
 
-
 #[test]
 fn singlecelldata_to_sparse_real_can_be_written_and_read() {
     let mut celldata = Scdata::new(1, MatrixValueType::Real);
@@ -199,18 +174,8 @@ fn singlecelldata_to_sparse_real_can_be_written_and_read() {
     assert!(celldata.try_insert_value(&1_u64, GeneUmiHash(gene4, 0), 10.0, &mut report));
 
     // Cell 2: Gene3 total 20.0, Gene1 total 20.0
-    assert!(celldata.try_insert_value(
-        &13_452_355_u64,
-        GeneUmiHash(gene3, 0),
-        20.0,
-        &mut report
-    ));
-    assert!(celldata.try_insert_value(
-        &13_452_355_u64,
-        GeneUmiHash(gene1, 0),
-        20.0,
-        &mut report
-    ));
+    assert!(celldata.try_insert_value(&13_452_355_u64, GeneUmiHash(gene3, 0), 20.0, &mut report));
+    assert!(celldata.try_insert_value(&13_452_355_u64, GeneUmiHash(gene1, 0), 20.0, &mut report));
 
     // Duplicate should still be rejected.
     assert!(
@@ -226,7 +191,10 @@ fn singlecelldata_to_sparse_real_can_be_written_and_read() {
     celldata.finalize_for_export(0, &feature_index);
 
     let write_result = celldata.write_sparse(&out_dir, &feature_index);
-    assert!(write_result.is_ok(), "write_sparse failed: {write_result:?}");
+    assert!(
+        write_result.is_ok(),
+        "write_sparse failed: {write_result:?}"
+    );
 
     let matrix_path = out_dir.join("matrix.mtx.gz");
     let features_path = out_dir.join("features.tsv.gz");
@@ -238,5 +206,9 @@ fn singlecelldata_to_sparse_real_can_be_written_and_read() {
 
     // Reading should at least succeed.
     let scdata2 = Scdata::read_matrix_market(&out_dir, &feature_index);
-    assert!(scdata2.is_ok(), "read_matrix_market failed: {}",scdata2.unwrap());
+    assert!(
+        scdata2.is_ok(),
+        "read_matrix_market failed: {}",
+        scdata2.unwrap()
+    );
 }

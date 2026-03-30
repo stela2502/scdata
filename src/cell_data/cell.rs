@@ -148,11 +148,10 @@ impl CellData {
         self.seen.len()
     }
 
-
     /// Accumulated value for one feature id.
     pub fn total_umis_4_gene_id(&self, feature_id: &u64) -> f32 {
         *self.total_reads.get(feature_id).unwrap_or(&0.0)
-    }    
+    }
 
     /// Mean value helper.
     ///
@@ -162,20 +161,11 @@ impl CellData {
         let total = *self.total_reads.get(feature_id)?;
         let n = self.seen.iter().filter(|gh| gh.0 == *feature_id).count();
 
-        if n > 0 {
-            Some(total / n as f32)
-        } else {
-            None
-        }
+        if n > 0 { Some(total / n as f32) } else { None }
     }
 
-
     /// Dense row export helper.
-    pub fn to_str_for_feature_ids(
-        &self,
-        feature_ids: &[u64],
-        _length: usize,
-    ) -> String {
+    pub fn to_str_for_feature_ids(&self, feature_ids: &[u64], _length: usize) -> String {
         let mut data = Vec::<String>::with_capacity(feature_ids.len() + 4);
 
         data.push(IntToStr::u8_array_to_str(&self.name.to_le_bytes()).to_string());
