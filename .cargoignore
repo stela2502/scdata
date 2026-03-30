@@ -1,5 +1,5 @@
-target/
-.github/
+target/**
+.github/**
 Cargo.toml.orig
 .gitignore
 tests/.gitignore
