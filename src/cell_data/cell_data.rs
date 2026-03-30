@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ambient_rna_detect::AmbientRnaDetect;
 use crate::cell_data::GeneUmiHash;
-use crate::feature_index::FeatureIndex;
 
 use core::fmt;
 use int_to_str::int_to_str::IntToStr;
@@ -30,11 +29,6 @@ pub struct CellData {
     /// feature_id -> accumulated value / count
     pub total_reads: HashMap<u64, f32>,
 
-    pub passing: bool,
-
-    /// Total number of unique feature/UMI observations.
-    pub total_umis: usize,
-
     /// Multimapped sequences.
     pub multimapper: HashMap<u64, MultiMapper>,
 }
@@ -44,8 +38,7 @@ impl fmt::Display for CellData {
         writeln!(f, "CellData Summary")?;
         writeln!(f, "----------------")?;
         writeln!(f, "Cell Name (ID): {}", self.name)?;
-        writeln!(f, "Passing Filter: {}", self.passing)?;
-        writeln!(f, "Total UMIs: {}", self.total_umis)?;
+        writeln!(f, "Total UMIs: {}", self.total_umis())?;
         writeln!(f, "Seen Feature/UMI Pairs: {}", self.seen.len())?;
 
         writeln!(f, "\nPer-Feature Totals:")?;
@@ -94,9 +87,6 @@ impl CellData {
                 non_ambient.add(*gh);
             }
         }
-
-        non_ambient.passing = true;
-        ambient_data.passing = true;
 
         (non_ambient, ambient_data)
     }
@@ -153,14 +143,14 @@ impl CellData {
         true
     }
 
-    /// Number of unique feature/UMI observations in this cell.
-    pub fn n_umi(&self) -> usize {
+    /// better API - Number of unique feature/UMI observations in this cell.
+    pub fn total_umis(&self) -> usize {
         self.seen.len()
-    }    
+    }
 
 
     /// Accumulated value for one feature id.
-    pub fn n_umi_4_gene_id(&self, feature_id: &u64) -> f32 {
+    pub fn total_umis_4_gene_id(&self, feature_id: &u64) -> f32 {
         *self.total_reads.get(feature_id).unwrap_or(&0.0)
     }    
 
@@ -179,24 +169,6 @@ impl CellData {
         }
     }
 
-    /*
-    /// Total accumulated value across selected feature names.
-    pub fn n_reads<I: FeatureIndex>(&self, feature_index: &I, names: &[String]) -> f32 {
-        let mut n = 0.0;
-
-        let feature_ids = feature_index.ids_for_feature_names(names);
-
-        for id in feature_ids {
-            n += *self.total_reads.get(&id).unwrap_or(&0.0);
-        }
-
-        n
-    }
-
-
-
-
-    */
 
     /// Dense row export helper.
     pub fn to_str_for_feature_ids(
@@ -268,7 +240,7 @@ mod tests {
         let cell = CellData::new(42);
 
         assert_eq!(cell.name, 42);
-        assert_eq!(cell.total_umis, 0);
+        assert_eq!(cell.total_umis(), 0);
         assert!(cell.seen.is_empty());
         assert!(cell.total_reads.is_empty());
     }
@@ -281,7 +253,7 @@ mod tests {
         let inserted = cell.add(fh);
 
         assert!(inserted);
-        assert_eq!(cell.total_umis, 1);
+        assert_eq!(cell.total_umis(), 1);
         assert!(cell.seen.contains(&fh));
         assert_eq!(cell.total_reads.get(&10), Some(&1.0));
     }
@@ -295,7 +267,7 @@ mod tests {
         assert!(cell.add(fh));
         assert!(!cell.add(fh));
 
-        assert_eq!(cell.total_umis, 1);
+        assert_eq!(cell.total_umis(), 1);
         assert_eq!(cell.total_reads.get(&10), Some(&1.0));
     }
 
@@ -310,18 +282,18 @@ mod tests {
 
         assert!(cell.seen.contains(&fh));
         assert_eq!(cell.total_reads.get(&5), Some(&2.0));
-        assert_eq!(cell.total_umis, 1);
+        assert_eq!(cell.total_umis(), 1);
     }
 
     #[test]
-    fn test_n_umi() {
+    fn test_total_umis() {
         let mut cell = CellData::new(1);
 
         cell.add(GeneUmiHash(1, 10));
         cell.add(GeneUmiHash(1, 11));
         cell.add(GeneUmiHash(2, 12));
 
-        assert_eq!(cell.n_umi(), 3);
+        assert_eq!(cell.total_umis(), 3);
     }
 
     #[test]
@@ -337,7 +309,7 @@ mod tests {
 
         a.merge(&b);
 
-        assert_eq!(a.total_umis, 2);
+        assert_eq!(a.total_umis(), 2);
         assert!(a.seen.contains(&fh1));
         assert!(a.seen.contains(&fh2));
         assert_eq!(a.total_reads.get(&1), Some(&1.0));
@@ -345,16 +317,16 @@ mod tests {
     }
 
     #[test]
-    fn test_n_umi_for_feature() {
+    fn test_total_umis_for_feature() {
         let mut cell = CellData::new(1);
 
         cell.add(GeneUmiHash(5, 1));
         cell.add(GeneUmiHash(5, 2));
         cell.add(GeneUmiHash(3, 1));
 
-        assert_eq!(cell.n_umi_4_gene_id(&5), 2.0);
-        assert_eq!(cell.n_umi_4_gene_id(&3), 1.0);
-        assert_eq!(cell.n_umi_4_gene_id(&9), 0.0);
+        assert_eq!(cell.total_umis_4_gene_id(&5), 2.0);
+        assert_eq!(cell.total_umis_4_gene_id(&3), 1.0);
+        assert_eq!(cell.total_umis_4_gene_id(&9), 0.0);
     }
 
     #[test]

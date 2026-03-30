@@ -2,241 +2,190 @@
 
 [![Rust](https://github.com/stela2502/scdata/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/stela2502/scdata/actions/workflows/rust.yml)
 
-A lightweight Rust library for handling **sparse single-cell expression
-data**, with support for incremental insertion, merging, and Matrix
-Market import/export.
+A high-performance Rust library for constructing **sparse single-cell UMI count data**, with deterministic export to Matrix Market (10x-style) format.
 
-This crate is designed for high-performance pipelines where you want: -
-Fine-grained control over sparse data - Thread-aware data insertion -
-Explicit gene indexing - Matrix Market compatibility - Clean Rust-native
-APIs
 
-------------------------------------------------------------------------
+`scdata` is built around a strict separation of concerns:
+
+- data accumulation (UMI-aware)
+- export (deterministic, index-driven)
+
+It intentionally does **not** implement matrix operations.
+
+---
 
 ## Overview
 
-`scdata` provides the following main components:
+`scdata` is designed for building **production-grade single-cell pipelines** in Rust.
 
-### `Scdata`
+It provides:
 
-Core sparse container for single-cell count data.
+- Incremental UMI-aware insertion
+- Duplicate detection
+- Efficient merging
+- Deterministic export using a **canonical feature index**
+- Matrix Market compatibility
 
-### `IndexedGenes`
+---
 
-Gene name ↔ index mapping.
+## Core Concepts
 
-### `CellData`
+### Scdata
 
-Internal per-cell sparse representation.
+Sparse container for single-cell data.
 
-### `AmbientRnaDetect`
+- Stores cells in 256 buckets (hash-partitioned)
+- Tracks unique `(feature_id, UMI)` pairs
+- Aggregates counts per feature
 
-Utilities for detecting ambient RNA contamination (experimental).
+---
 
-### `MatrixValueType`
+### CellData
 
-Specifies the Matrix Market value type: - `Integer` - `Real` -
-`Complex` - `Pattern` - `Unknown(String)`
+Per-cell storage:
 
-------------------------------------------------------------------------
+- `seen`: unique `(feature_id, UMI)` pairs
+- `total_reads`: aggregated counts per feature
 
-# Design Philosophy
 
-- Sparse-first architecture
-- Incremental insertion (`try_insert`)
-- Explicit gene indexing
-- Controlled merging
-- Minimal dependencies
-- Matrix Market interoperability
+### Cell Identifiers
 
-------------------------------------------------------------------------
+`scdata` stores cell identifiers internally as `u64` values.
 
-# Installation
+If you want exported `barcodes.tsv.gz` entries to appear as DNA barcode strings, these `u64` values must encode the barcode sequence in the 2-bit format used by `int_to_str`.
 
-Add to your `Cargo.toml`:
+During accumulation, `scdata` treats cell IDs simply as numeric identifiers. During export, those numeric values are rendered back to DNA strings using `int_to_str`.
+
+#### Encoding DNA barcodes for use with `scdata`
 
 ```toml
-scdata = { git = "https://github.com/stela2502/scdata" }
+[dependencies]
+stela-int-to-str = "0.1"
 ```
-
-------------------------------------------------------------------------
-
-# Basic Usage
-
-## 1️⃣ Create Gene Index
 
 ```rust
-use scdata::IndexedGenes;
+use int_to_str::int_to_str::IntToStr;
 
-let genes = IndexedGenes::from_names(vec![
-    "GeneA",
-    "GeneB",
-    "GeneC"
-]);
+let barcode = "ATGACTCTCAGCATGG";
+let cell_id: u64 = IntToStr::new(barcode.as_bytes()).into_u64();
 ```
 
-This creates a stable mapping between gene names and internal indices.
-
-------------------------------------------------------------------------
-
-## 2️⃣ Create a Sparse Dataset
+You can then use `cell_id` as the cell identifier in `Scdata`:
 
 ```rust
-use scdata::{Scdata, MatrixValueType};
-
-let mut data = Scdata::new(
-    4,                         // number of threads
-    MatrixValueType::Integer   // matrix type
-);
+scdata.try_insert(&cell_id, gene_umi_hash, 0.0, &mut report);
 ```
 
-------------------------------------------------------------------------
+#### Important note
 
-## 3️⃣ Insert Counts
+`scdata` does not validate whether a given `u64` really represents a valid DNA barcode.
+
+If you pass arbitrary numeric IDs, they will still be stored correctly, but barcode export will interpret them as 2-bit encoded DNA and render the corresponding sequence.
+
+---
+
+### FeatureIndex (critical)
+
+Defines the **canonical feature space** and export order.
 
 ```rust
-use scdata::Scdata;
-use mapping_info::MappingInfo; // example external report struct
-
-let mut report = MappingInfo::default();
-
-let cell_id: u64 = 123456;
-let gene_hash: GeneUmiHash = ...; // your gene/UMI hash structure
-
-data.try_insert(
-    &cell_id,
-    gene_hash,
-    1.0,
-    &mut report
-);
+pub trait FeatureIndex {
+    fn feature_name(&self, feature_id: u64) -> &str;
+    fn feature_id(&self, name: &str) -> Option<u64>;
+    fn ordered_feature_ids(&self) -> Vec<u64>;
+    fn to_10x_feature_line(&self, feature_id: u64) -> String;
+}
 ```
 
-`try_insert`: - Inserts a value into the sparse structure - Returns
-`true` if insertion succeeded - Updates external `MappingInfo`
+👉 This ensures stable row order across exports.
 
-------------------------------------------------------------------------
+---
 
-## 4️⃣ Merge Datasets
+### MatrixValueType
+
+Controls Matrix Market output:
+
+- Integer (recommended)
+- Real (limited support)
+
+---
+
+## Workflow
+
+### 1. Create dataset
 
 ```rust
-data.merge(&other_dataset);
+let mut data = Scdata::new(4, MatrixValueType::Integer);
 ```
 
-This merges sparse cell structures efficiently.
-
-------------------------------------------------------------------------
-
-## 5️⃣ Export Data
-
-### Write filtered matrix
+### 2. Insert data
 
 ```rust
-use std::path::PathBuf;
-
-let output = PathBuf::from("matrix.mtx");
-
-data.write(
-    &output,
-    &genes,
-    10    // min_count threshold
-).unwrap();
+data.try_insert(&cell_id, gene_umi_hash, 0.0, &mut report);
 ```
 
-### Write sparse format explicitly
+### 3. Finalize for export
 
 ```rust
-data.write_sparse(
-    &output,
-    &genes,
-    10
-).unwrap();
+data.finalize_for_export(min_total_umis, &feature_index);
 ```
 
-------------------------------------------------------------------------
-
-## 6️⃣ Read Matrix Market
+### 4. Export
 
 ```rust
-let (data, genes) =
-    Scdata::read_matrix_market("matrix.mtx").unwrap();
+data.write_sparse(&output_dir, &feature_index)?;
 ```
 
-This loads both: - The sparse matrix - The gene index
+---
 
-------------------------------------------------------------------------
+## Matrix Market Output
 
-# Internal Structure
+Produces standard 10x-style files:
 
-```text
-Scdata
- ├── data: [BTreeMap<u64, CellData>; 255]
- ├── genes_with_data: HashSet<usize>
- ├── num_threads
- └── value_type
-```
+- matrix.mtx.gz
+- features.tsv.gz
+- barcodes.tsv.gz
 
-Key design features:
+Feature order is derived from `FeatureIndex`, not data.
 
-- Per-thread storage buckets
-- BTreeMap for deterministic ordering
-- Gene-level tracking via `genes_with_data`
-- Lazy validation (`checked` flag)
+---
 
-------------------------------------------------------------------------
+## Design Philosophy
 
-# Matrix Market Compatibility
+- UMI-centric (not raw count matrix first)
+- Deterministic export
+- Explicit feature indexing
+- Separation of:
+  - data ingestion
+  - finalization
+  - export
+- No hidden magic
 
-Supports standard `.mtx` sparse format.
+---
 
-Typical 10x-style layout:
+## When to use scdata
 
-    matrix.mtx
-    genes.tsv
-    barcodes.tsv
+✔ Rust-native single-cell pipelines  
+✔ High-performance UMI counting  
+✔ Deterministic reproducible outputs  
+✔ Avoid Python/R dependencies
 
-You can integrate this library into pipelines that:
+---
 
-- Process CellRanger outputs
-- Produce Scanpy-compatible matrices
-- Export to downstream R/Python workflows
+## Limitations
 
-------------------------------------------------------------------------
+- Real-valued matrices are not a primary target
+- Requires external feature index for export
+- MatrixMarket import reconstructs integer counts only
 
-# Threading Model
+---
 
-- `num_threads` controls internal parallelization
-- Designed for deterministic merge behavior
-- No implicit global locks
+## License
 
-------------------------------------------------------------------------
+MIT or Apache-2.0
 
-# When To Use scdata
+---
 
-✔ Building custom RNA-seq pipelines in Rust\
-✔ Integrating single-cell logic into Rust tools\
-✔ Avoiding Python/R for production pipelines\
-✔ High-performance sparse counting\
-✔ Custom filtering logic before export
+## Author
 
-------------------------------------------------------------------------
-
-# Roadmap Ideas
-
-- Whitelist-based sample detection
-- Improved ambient RNA modeling
-- HDF5 export
-- 10x-compatible directory export
-- Compression support
-
-------------------------------------------------------------------------
-
-# License
-
-MIT or Apache-2.0 (depending on repository settings)
-
-------------------------------------------------------------------------
-
-# Author
-
-Stefan Lang\
-Bioinformatics & Single-Cell Systems
+Stefan Lang

@@ -5,9 +5,9 @@ use rayon::prelude::*;
 
 use mapping_info::MappingInfo;
 
-use crate::cell_data::GeneUmiHash;
 use crate::cell_data::CellData;
-use crate::MatrixValueType;
+use crate::cell_data::GeneUmiHash;
+use crate::{MatrixValueType, FeatureIndex};
 
 /// Sparse single-cell count store.
 ///
@@ -17,17 +17,17 @@ pub struct Scdata {
     /// 256 buckets, indexed by top 8 bits of the cell id.
     pub(crate) data: [HashMap<u64, CellData>; u8::MAX as usize + 1],
 
-    /// Cached set of feature ids currently observed in retained cells.
+    /// Cached ordered feature ids currently observed in retained cells.
     pub(crate) feature_ids_with_data: Vec<u64>,
 
-    /// Cached number of stored feature entries across all cells
+    /// Cached number of stored feature entries across all retained cells.
     pub(crate) total_feature_data_entries: usize,
 
-    /// True once cell filtering has been evaluated.
-    checked: bool,
+    /// Ordered list of cells that define export column order.
+    pub(crate) export_cell_ids: Vec<u64>,
 
-    /// Number of currently passing cells.
-    passing: usize,
+    /// True once export selection/filtering has been evaluated.
+    checked: bool,
 
     /// Preferred thread count for internal parallel helpers.
     pub num_threads: usize,
@@ -49,7 +49,7 @@ impl fmt::Display for Scdata {
         writeln!(f, "Scdata Summary")?;
         writeln!(f, "===============")?;
         writeln!(f, "Checked: {}", self.checked)?;
-        writeln!(f, "Passing Cells: {}", self.passing)?;
+        writeln!(f, "Export Cells: {}", self.export_cell_ids.len())?;
         writeln!(f, "Matrix Value Type: {:?}", self.value_type)?;
         writeln!(
             f,
@@ -75,8 +75,8 @@ impl Scdata {
             data,
             feature_ids_with_data: Vec::new(),
             total_feature_data_entries: 0,
+            export_cell_ids: Vec::new(),
             checked: false,
-            passing: 0,
             num_threads,
             value_type,
         }
@@ -96,13 +96,15 @@ impl Scdata {
         (*name >> 56) as usize
     }
 
-    /// Invalidate cached filtering/export-derived state after matrix mutation.
+    /// Invalidate cached export-derived state after matrix mutation.
     fn invalidate_export_cache(&mut self) {
         self.checked = false;
-        self.passing = 0;
+        self.export_cell_ids.clear();
+        self.feature_ids_with_data.clear();
+        self.total_feature_data_entries = 0;
     }
 
-    /// Iterate over all stored cells across all buckets.
+    /// Iterate over all currently stored cells across all buckets.
     pub(crate) fn values(&self) -> impl Iterator<Item = &CellData> {
         self.data.iter().flat_map(|map| map.values())
     }
@@ -138,14 +140,6 @@ impl Scdata {
         self.data[index].get(key)
     }
 
-    /// Remove all cells currently marked as failing.
-    pub fn keep_only_passing_cells(&mut self) {
-        for map in &mut self.data {
-            map.retain(|_, cell_data| cell_data.passing);
-        }
-        self.rebuild_feature_ids_with_data();
-    }
-
     /// Merge another matrix into this one in parallel, bucket by bucket.
     pub fn merge(&mut self, other: &Scdata) {
         if other.is_empty() {
@@ -171,8 +165,6 @@ impl Scdata {
                     }
                 }
             });
-
-        self.rebuild_feature_ids_with_data();
     }
 
     /// Merge another matrix into this one by consuming the source in a single thread.
@@ -194,8 +186,6 @@ impl Scdata {
                 }
             }
         }
-
-        self.rebuild_feature_ids_with_data();
     }
 
     /// Insert one unique feature/UMI observation for a cell.
@@ -221,8 +211,8 @@ impl Scdata {
             report.pcr_duplicates += 1;
             report.local_dup += 1;
             false
-        } else{
-        	true
+        } else {
+            true
         }
     }
 
@@ -244,25 +234,38 @@ impl Scdata {
         report.ok_reads += 1;
 
         cell_info.add_value(data, value)
-
     }
 
-    /// Return the number of cells currently marked as passing.
+    pub(crate) fn check_sparse_export_ready(&self) -> Result<(), String> {
+        if !self.checked {
+            return Err(
+                "Sparse export requires finalize_for_export(...) first.".to_string(),
+            );
+        }
+
+        if self.export_cell_ids.is_empty() {
+            return Err("Sparse export failed: no export cells available.".to_string());
+        }
+
+        Ok(())
+    }
+
+
+    /// Return the number of cells currently selected for export.
     pub fn passing_cells(&self) -> usize {
-        self.passing
+        self.export_cell_ids.len()
     }
 
-    /// Return all currently retained cell ids.
-	pub fn cell_ids(&self) -> HashSet<u64> {
-	    self.data
-	        .iter()
-	        .flat_map(|bucket| bucket.keys().copied())
-	        .collect()
-	}
-
+    /// Return all currently stored cell ids.
+    pub fn cell_ids(&self) -> HashSet<u64> {
+        self.data
+            .iter()
+            .flat_map(|bucket| bucket.keys().copied())
+            .collect()
+    }
 
     /// Return the set of cell ids with at least `min_count` UMIs.
-    pub fn passing_cell_set_by_umi(&self, min_count: usize) -> HashSet<u64> {
+    fn passing_cell_set_by_umi(&self, min_count: usize) -> HashSet<u64> {
         let keys = self.keys();
         if keys.is_empty() {
             return HashSet::new();
@@ -277,7 +280,7 @@ impl Scdata {
                 let mut keep = Vec::<u64>::with_capacity(chunk.len());
                 for key in chunk {
                     if let Some(cell) = self.get(key) {
-                        if cell.n_umi() >= min_count {
+                        if cell.total_umis() >= min_count {
                             keep.push(*key);
                         }
                     }
@@ -289,71 +292,81 @@ impl Scdata {
         passing.into_iter().collect()
     }
 
-	/// Rebuild the cached set of feature ids observed in all cells
-	/// and count the total number of stored sparse matrix entries.
-	///
-	/// The feature id cache is collected from the per-cell `total_reads` keys.
-	/// The total number of exported sparse entries is the sum of
-	/// `cell.total_reads.len()` across all cells.
-	fn rebuild_feature_ids_with_data(&mut self) {
-	    let (feature_ids, total_entries) = self
-	        .data
-	        .par_iter()
-	        .map(|bucket| {
-	            let mut local_ids = HashSet::with_capacity(64);
-	            let mut local_entries = 0usize;
+    /// Rebuild cached export metadata from the currently retained cells.
+    ///
+    /// The feature id cache is collected from the per-cell `total_reads` keys.
+    /// The total number of exported sparse entries is the sum of
+    /// `cell.total_reads.len()` across all retained cells.
+    fn rebuild_feature_ids_with_data<I: FeatureIndex>(&mut self, index: &I,) {
+        let (observed_feature_ids, total_entries) = self
+            .data
+            .par_iter()
+            .map(|bucket| {
+                let mut local_ids = HashSet::with_capacity(64);
+                let mut local_entries = 0usize;
 
-	            for cell in bucket.values() {
-	                for feature_id in cell.total_reads.keys() {
-	                    local_ids.insert(*feature_id);
-	                }
+                for cell in bucket.values() {
+                    for feature_id in cell.total_reads.keys() {
+                        local_ids.insert(*feature_id);
+                    }
 
-	                local_entries += cell.total_reads.len();
-	            }
+                    local_entries += cell.total_reads.len();
+                }
 
-	            (local_ids, local_entries)
-	        })
-	        .reduce(
-	            || (HashSet::new(), 0usize),
-	            |(mut ids_a, n_a), (ids_b, n_b)| {
-	                ids_a.extend(ids_b);
-	                (ids_a, n_a + n_b)
-	            },
-	        );
+                (local_ids, local_entries)
+            })
+            .reduce(
+                || (HashSet::new(), 0usize),
+                |(mut ids_a, n_a), (ids_b, n_b)| {
+                    ids_a.extend(ids_b);
+                    (ids_a, n_a + n_b)
+                },
+            );
 
-	    let mut feature_ids: Vec<u64> = feature_ids.into_iter().collect();
+        let feature_ids_with_data = index
+            .ordered_feature_ids()
+            .into_iter()
+            .filter(|fid| observed_feature_ids.contains(fid))
+            .collect();
 
-	    // Ensure deterministic export order.
-	    feature_ids.sort_unstable();
+        self.feature_ids_with_data = feature_ids_with_data;
+        self.total_feature_data_entries = total_entries;
+    }
 
-	    self.feature_ids_with_data = feature_ids;
-	    self.total_feature_data_entries = total_entries;
-	}
-
-    /// Restrict the matrix to cell witzh more than min_umis unique reads.
-	pub fn retain_cells_with_min_umis(&mut self, min_umis: usize) {
-	    for bucket in &mut self.data {
-	        bucket.retain(|_, cell| cell.seen.len() >= min_umis);
-	    }
-
-	    // after filtering the export cache must be recomputed
-	    self.rebuild_feature_ids_with_data();
-	}
-
-    /// Restrict the matrix to a predefined set of cell ids and mark them as passing.
-    pub fn restrict_to_cells(&mut self, keep: &HashSet<u64>) {
-        self.passing = 0;
-
+    /// Restrict the matrix to a predefined set of cell ids.
+    ///
+    /// Also establishes deterministic export column order.
+    fn restrict_to_cells(&mut self, keep: &HashSet<u64>) {
         for bucket in &mut self.data {
             bucket.retain(|cell_id, _| keep.contains(cell_id));
         }
 
-        for cell in self.data.iter_mut().flat_map(|m| m.values_mut()) {
-            cell.passing = true;
-            self.passing += 1;
-        }
+        let mut export_cell_ids: Vec<u64> = self
+            .data
+            .iter()
+            .flat_map(|bucket| bucket.keys().copied())
+            .collect();
 
-        self.rebuild_feature_ids_with_data();
+        export_cell_ids.sort_unstable();
+
+        self.export_cell_ids = export_cell_ids;
+    }
+
+    /// Prepare the object for export.
+    ///
+    /// This applies the UMI cutoff, retains only passing cells,
+    /// establishes deterministic export order, rebuilds export caches,
+    /// and marks the object as checked.
+    pub fn finalize_for_export<I: FeatureIndex>(&mut self, min_total_umis: usize, index: &I,) {
+        let keep = self.passing_cell_set_by_umi(min_total_umis);
+        self.restrict_to_cells(&keep);
+        self.rebuild_feature_ids_with_data(index);
         self.checked = true;
+    }
+
+
+    /// Return the ordered export cell ids.
+    pub fn export_cell_ids(&self) -> &[u64] {
+        &self.export_cell_ids
     }
 }

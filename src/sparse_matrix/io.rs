@@ -12,10 +12,11 @@ use int_to_str::int_to_str::IntToStr;
 use mapping_info::MappingInfo;
 
 use crate::cell_data::GeneUmiHash;
-use crate::feature_index::FeatureIndex;
-use crate::{MatrixValueType, Scdata};
+use crate::{MatrixValueType, Scdata, FeatureIndex};
 
 impl Scdata {
+
+
     /// Write a dense TSV matrix.
     ///
     /// Rows = cells  
@@ -34,6 +35,8 @@ impl Scdata {
 
         let mut writer = BufWriter::new(file);
 
+
+
         // header
         let mut cols = Vec::new();
         cols.push("CellID".to_string());
@@ -47,9 +50,6 @@ impl Scdata {
 
         // rows
         for cell in self.values() {
-            if !cell.passing {
-                continue;
-            }
 
             let mut row = Vec::with_capacity(cols.len());
 
@@ -80,6 +80,7 @@ impl Scdata {
         outdir: &PathBuf,
         index: &I,
     ) -> Result<String, String> {
+        self.check_sparse_export_ready()?;
         if !outdir.exists() {
             fs::create_dir_all(outdir)
                 .map_err(|e| format!("Could not create output dir {}: {e}", outdir.display()))?;
@@ -109,8 +110,6 @@ impl Scdata {
                 .map_err(|e| format!("Writing features.tsv.gz failed: {e}"))?;
         }
 
-        self.keep_only_passing_cells();
-
         let mut entries = 0usize;
         let mut cell_id = 0usize;
         let value_type = self.value_type(None).clone();
@@ -132,9 +131,11 @@ impl Scdata {
         )
         .map_err(|e| format!("Matrix dims write failed: {e}"))?;
 
-        for cell in self.values() {
+        for (cell_id, col_idx) in self.export_cell_ids.iter().zip(1..) {
 
-            cell_id += 1;
+            let cell = self
+                .get(cell_id)
+                .ok_or_else(|| format!("Export cell {cell_id} missing from Scdata"))?;
 
             let cell_name = IntToStr::u8_array_to_str(&cell.name.to_le_bytes());
 
@@ -144,7 +145,7 @@ impl Scdata {
 			for (row_idx, feature_id) in self.feature_ids_with_data.iter().enumerate() {
 			    if let Some(value) = cell.total_reads.get(feature_id) {
 			        if *value > 0.0 {
-			            writeln!(writer_m, "{} {} {}", row_idx + 1, cell_id, value_type.format_matrix_market_value(*value)? )
+			            writeln!(writer_m, "{} {} {}", row_idx + 1, col_idx, value_type.format_matrix_market_value(*value)? )
 			                .map_err(|e| format!("Matrix entry write failed: {e}"))?;
 
 			            entries += 1;
@@ -174,94 +175,144 @@ impl Scdata {
     ///
     /// Returns `(Scdata, FeatureIndex-like data)`
     /// for compatibility with previous pipelines.
-    pub fn read_matrix_market<P: AsRef<Path>>(
-        path: P,
-    ) -> Result<Self, String> {
-        let base = path.as_ref();
+    pub fn read_matrix_market<P: AsRef<Path>, I: FeatureIndex>(
+    path: P,
+    index: &I,
+) -> Result<Self, String> {
+    let base = path.as_ref();
 
-        let barcodes_path = base.join("barcodes.tsv.gz");
-        let matrix_path = base.join("matrix.mtx.gz");
+    let barcodes_path = base.join("barcodes.tsv.gz");
+    let features_path = base.join("features.tsv.gz");
+    let matrix_path = base.join("matrix.mtx.gz");
 
-        let mut report = MappingInfo::new(None, 0.0, 0);
+    let mut report = MappingInfo::new(None, 0.0, 0);
 
-        let barcodes: Vec<u64> = {
-            let f = File::open(&barcodes_path)
-                .map_err(|e| format!("Cannot open barcodes: {e}"))?;
+    let barcodes: Vec<u64> = {
+        let f = File::open(&barcodes_path)
+            .map_err(|e| format!("Cannot open barcodes {}: {e}", barcodes_path.display()))?;
 
-            let reader = BufReader::new(GzDecoder::new(BufReader::new(f)));
+        let reader = BufReader::new(GzDecoder::new(BufReader::new(f)));
 
-            reader
-                .lines()
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| format!("Reading barcodes failed: {e}"))?
-                .into_iter()
-                .map(|barcode| IntToStr::new(&barcode).into_u64())
-                .collect()
-        };
+        reader
+            .lines()
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Reading barcodes failed: {e}"))?
+            .into_iter()
+            .map(|barcode| IntToStr::new(&barcode).into_u64())
+            .collect()
+    };
 
-        let file = File::open(&matrix_path)
-            .map_err(|e| format!("Failed to open matrix file: {e}"))?;
+    let feature_ids: Vec<u64> = {
+        let f = File::open(&features_path)
+            .map_err(|e| format!("Cannot open features {}: {e}", features_path.display()))?;
 
-        let reader = BufReader::new(GzDecoder::new(BufReader::new(file)));
+        let reader = BufReader::new(GzDecoder::new(BufReader::new(f)));
 
-        let mut lines = reader.lines();
+        reader
+            .lines()
+            .map(|line| {
+                let line = line.map_err(|e| format!("Reading features failed: {e}"))?;
+                let feature_name = line
+                    .split('\t')
+                    .next()
+                    .ok_or_else(|| "Malformed features.tsv.gz line".to_string())?;
 
-        let mut scdata = Scdata::default();
+                index
+                    .feature_id(feature_name)
+                    .ok_or_else(|| {
+                        format!(
+                            "Unknown feature name in features.tsv.gz: {feature_name}"
+                        )
+                    })
+            })
+            .collect::<Result<Vec<u64>, String>>()?
+    };
 
-        let mut header_seen = false;
-        let mut dims_seen = false;
+    let file = File::open(&matrix_path)
+        .map_err(|e| format!("Failed to open matrix file {}: {e}", matrix_path.display()))?;
 
-        for line in lines.by_ref() {
-            let line = line.map_err(|e| format!("Matrix read error: {e}"))?;
+    let reader = BufReader::new(GzDecoder::new(BufReader::new(file)));
+    let mut lines = reader.lines();
 
-            if line.trim().is_empty() {
-                continue;
-            }
+    let mut scdata = Scdata::default();
 
-            if !header_seen {
-                header_seen = true;
-                continue;
-            }
+    let mut header_seen = false;
+    let mut dims_seen = false;
 
-            if line.starts_with('%') {
-                continue;
-            }
+    for line in lines.by_ref() {
+        let line = line.map_err(|e| format!("Matrix read error: {e}"))?;
 
-            if !dims_seen {
-                dims_seen = true;
-                continue;
-            }
-
-            let mut parts = line.split_whitespace();
-
-            let row = parts
-                .next()
-                .ok_or("Missing row")?
-                .parse::<usize>()
-                .map_err(|e| e.to_string())?;
-
-            let col = parts
-                .next()
-                .ok_or("Missing col")?
-                .parse::<usize>()
-                .map_err(|e| e.to_string())?;
-
-            let val = parts
-                .next()
-                .ok_or("Missing value")?
-                .parse::<f32>()
-                .map_err(|e| e.to_string())?;
-
-            for umi in 0..val as u64 {
-                scdata.try_insert(
-                    &barcodes[col - 1],
-                    GeneUmiHash((row - 1) as u64 , umi),
-                    0.0,
-                    &mut report,
-                );
-            }
+        if line.trim().is_empty() {
+            continue;
         }
 
-        Ok(scdata)
+        if !header_seen {
+            header_seen = true;
+            continue;
+        }
+
+        if line.starts_with('%') {
+            continue;
+        }
+
+        if !dims_seen {
+            dims_seen = true;
+            continue;
+        }
+
+        let mut parts = line.split_whitespace();
+
+        let row = parts
+            .next()
+            .ok_or_else(|| "Missing row".to_string())?
+            .parse::<usize>()
+            .map_err(|e| format!("Invalid row index: {e}"))?;
+
+        let col = parts
+            .next()
+            .ok_or_else(|| "Missing col".to_string())?
+            .parse::<usize>()
+            .map_err(|e| format!("Invalid col index: {e}"))?;
+
+        let val = parts
+            .next()
+            .ok_or_else(|| "Missing value".to_string())?
+            .parse::<f32>()
+            .map_err(|e| format!("Invalid matrix value: {e}"))?;
+
+        if row == 0 || row > feature_ids.len() {
+            return Err(format!(
+                "Matrix row index {row} out of bounds for {} features",
+                feature_ids.len()
+            ));
+        }
+
+        if col == 0 || col > barcodes.len() {
+            return Err(format!(
+                "Matrix col index {col} out of bounds for {} barcodes",
+                barcodes.len()
+            ));
+        }
+
+        let feature_id = feature_ids[row - 1];
+        let cell_id = barcodes[col - 1];
+
+        if val.fract() != 0.0 {
+            return Err(format!(
+                "Non-integer value {val} encountered while reading integer-style MatrixMarket import"
+            ));
+        }
+
+        for umi in 0..val as u64 {
+            scdata.try_insert(
+                &cell_id,
+                GeneUmiHash(feature_id, umi),
+                0.0,
+                &mut report,
+            );
+        }
     }
+
+    Ok(scdata)
+}
 }

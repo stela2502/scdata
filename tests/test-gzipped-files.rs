@@ -47,6 +47,12 @@ impl FeatureIndex for TestFeatureIndex {
         let name = self.feature_name(feature_id);
         format!("{name}\t{name}\tGene Expression")
     }
+    fn ordered_feature_ids(&self) -> Vec<u64> {
+        (0..self.names.len() as u64).collect()
+    }
+    fn feature_id(&self, name: &str) -> Option<u64> {
+        self.name_to_id.get(name).copied()
+    }
 }
 
 fn test_out_dir(name: &str) -> PathBuf {
@@ -65,7 +71,7 @@ fn read_gz_to_string(path: &PathBuf) -> String {
 }
 
 #[test]
-fn integer_matrix_mtx_gz_matches_expected_exactly() {
+fn integer_10x_gz_files_match_expected_exactly() {
     let mut scdata = Scdata::new(1, MatrixValueType::Integer);
     let mut report = MappingInfo::new(None, 56.0, 10_000);
 
@@ -116,42 +122,24 @@ fn integer_matrix_mtx_gz_matches_expected_exactly() {
         fs::remove_dir_all(&out_dir).unwrap();
     }
 
+    scdata.finalize_for_export(0, &feature_index);
     scdata
         .write_sparse(&out_dir, &feature_index)
         .unwrap_or_else(|e| panic!("write_sparse failed: {e}"));
 
     let matrix_path = out_dir.join("matrix.mtx.gz");
+    let features_path = out_dir.join("features.tsv.gz");
+    let barcodes_path = out_dir.join("barcodes.tsv.gz");
+
     assert!(matrix_path.exists(), "matrix.mtx.gz not found");
+    assert!(features_path.exists(), "features.tsv.gz not found");
+    assert!(barcodes_path.exists(), "barcodes.tsv.gz not found");
 
-    let actual = read_gz_to_string(&matrix_path);
+    let actual_matrix = read_gz_to_string(&matrix_path);
+    let actual_features = read_gz_to_string(&features_path);
+    let actual_barcodes = read_gz_to_string(&barcodes_path);
 
-    // Expected matrix:
-    //
-    // Exported features with data:
-    //   Gene1, Gene3, Gene4
-    // so there are 3 rows.
-    //
-    // Passing cells:
-    //   cell 1, cell 13_452_355
-    // so there are 2 columns.
-    //
-    // Nonzero aggregated entries:
-    //   Gene1 / cell1           = 20
-    //   Gene4 / cell1           = 10
-    //   Gene1 / cell13_452_355  = 20
-    //   Gene3 / cell13_452_355  = 20
-    //
-    // MatrixMarket rows must be dense 1-based row indices among exported features:
-    //   row 1 = Gene1
-    //   row 2 = Gene3
-    //   row 3 = Gene4
-    //
-    // MatrixMarket cols must be dense 1-based column indices among passing cells:
-    //   col 1 = cell 1
-    //   col 2 = cell 13_452_355
-    //
-    // Therefore the file must be exactly this:
-    let expected = concat!(
+    let expected_matrix = concat!(
         "%%MatrixMarket matrix coordinate integer general\n",
         "3 2 4\n",
         "1 1 20\n",
@@ -160,5 +148,27 @@ fn integer_matrix_mtx_gz_matches_expected_exactly() {
         "2 2 20\n",
     );
 
-    assert_eq!(actual, expected, "matrix.mtx.gz content mismatch");
+    let expected_features = concat!(
+        "Gene1\tGene1\tGene Expression\n",
+        "Gene3\tGene3\tGene Expression\n",
+        "Gene4\tGene4\tGene Expression\n",
+    );
+
+    let expected_barcodes = concat!(
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n",
+        "TAACACACCTATAAAAAAAAAAAAAAAAAAAA\n",
+    );
+
+    assert_eq!(
+        actual_matrix, expected_matrix,
+        "matrix.mtx.gz content mismatch"
+    );
+    assert_eq!(
+        actual_features, expected_features,
+        "features.tsv.gz content mismatch"
+    );
+    assert_eq!(
+        actual_barcodes, expected_barcodes,
+        "barcodes.tsv.gz content mismatch"
+    );
 }
