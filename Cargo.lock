@@ -200,9 +200,9 @@ dependencies = [
 
 [[package]]
 name = "indicatif"
-version = "0.18.0"
+version = "0.18.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70a646d946d06bedbbc4cac4c218acf4bbf2d87757a784857025f4d447e4e1cd"
+checksum = "25470f23803092da7d239834776d653104d551bc4d7eacaf31e6837854b8e9eb"
 dependencies = [
  "console",
  "portable-atomic",
@@ -211,11 +211,6 @@ dependencies = [
  "unit-prefix",
  "web-time",
 ]
-
-[[package]]
-name = "int_to_str"
-version = "0.1.0"
-source = "git+https://github.com/stela2502/int_to_str.git#b461f0dea8ec8992cf48f3920613af8a1bd21cc7"
 
 [[package]]
 name = "itoa"
@@ -248,7 +243,8 @@ checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
 [[package]]
 name = "mapping_info"
 version = "0.1.0"
-source = "git+https://github.com/stela2502/mapping_info.git#d5d2185e477b30e603cb9ad3776ff7d070afadec"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27075f46874b6f948e70bea35f58ff3e1d6584c1b9e05852db66f001d6579869"
 dependencies = [
  "atty",
  "chrono",
@@ -298,9 +294,9 @@ checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
 name = "portable-atomic"
-version = "1.11.1"
+version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f84267b20a16ea918e43c6a88433c2d54fa145c92a811b5b047ccbe153674483"
+checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
 
 [[package]]
 name = "proc-macro2"
@@ -380,10 +376,10 @@ name = "scdata"
 version = "0.2.0"
 dependencies = [
  "flate2",
- "int_to_str",
  "mapping_info",
  "rayon",
  "regex",
+ "stela-int-to-str",
 ]
 
 [[package]]
@@ -391,6 +387,12 @@ name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
+
+[[package]]
+name = "stela-int-to-str"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8c6a3ffb93f5c30b2376aa45c5ec3a76db1f16e6b60b5e242ad38c0d4ae411f"
 
 [[package]]
 name = "syn"
