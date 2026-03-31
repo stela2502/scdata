@@ -416,6 +416,19 @@ impl Scdata {
         self.checked = true;
     }
 
+    /// Prepare the object for export.
+    ///
+    /// Here a given set of cells are marked for export
+    pub fn finalize_for_cells<I: FeatureIndex>(
+        &mut self,
+        keep: &HashSet<u64>,
+        index: &I,
+    ) {
+        self.restrict_to_cells(keep);
+        self.rebuild_feature_ids_with_data(index);
+        self.checked = true;
+    }
+
     /// Return the ordered export cell ids.
     pub fn export_cell_ids(&self) -> &[u64] {
         &self.export_cell_ids
