@@ -429,4 +429,47 @@ impl Scdata {
     pub fn export_cell_ids(&self) -> &[u64] {
         &self.export_cell_ids
     }
+
+    pub fn observed_feature_ids(&self) -> HashSet<u64> {
+        self.data
+            .par_iter()
+            .map(|bucket| {
+                let mut local = HashSet::new();
+
+                for cell_data in bucket.values() {
+                    local.extend(cell_data.total_reads.keys().copied());
+                }
+
+                local
+            })
+            .reduce(HashSet::new, |mut a, b| {
+                a.extend(b);
+                a
+            })
+    }
+
+    pub fn retain_features(&mut self, keep: &HashSet<u64>) {
+        self.data.par_iter_mut().for_each(|bucket| {
+            for cell_data in bucket.values_mut() {
+                cell_data
+                    .total_reads
+                    .retain(|feature_id, _| keep.contains(feature_id));
+
+                cell_data
+                    .seen
+                    .retain(|gene_umi| keep.contains(&gene_umi.0));
+
+                cell_data
+                    .multimapper
+                    .retain(|feature_id, _| keep.contains(feature_id));
+            }
+
+            bucket.retain(|_, cell_data| !cell_data.total_reads.is_empty());
+        });
+
+        self.checked = false;
+        self.feature_ids_with_data.clear();
+        self.total_feature_data_entries = 0;
+        self.export_cell_ids.clear();
+    }
 }
