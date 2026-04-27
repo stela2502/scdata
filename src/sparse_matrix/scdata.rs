@@ -297,7 +297,7 @@ impl Scdata {
         }
 
         if self.export_cell_ids.is_empty() {
-            return Err("Sparse export failed: no export cells available.".to_string());
+            eprintln!("Sparse export failed: no export cells available.",);
         }
 
         Ok(())
