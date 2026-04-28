@@ -218,6 +218,67 @@ impl CellData {
 
         data.join("\t")
     }
+
+    #[cfg(feature = "compare")]
+    /// quick compare function
+    pub fn compare(&self, other: &Self, label: &str, cell_id: u64) -> Result<(), String> {
+        const EPS: f32 = 1e-6;
+
+        if self.name != other.name {
+            return Err(format!(
+                "{label}: cell {cell_id} name differs: left={} right={}",
+                self.name, other.name
+            ));
+        }
+
+        if self.seen != other.seen {
+            return Err(format!(
+                "{label}: cell {cell_id} seen UMI set differs: left={} right={}",
+                self.seen.len(),
+                other.seen.len()
+            ));
+        }
+
+        if self.total_reads.len() != other.total_reads.len() {
+            return Err(format!(
+                "{label}: cell {cell_id} total_reads size differs: left={} right={}",
+                self.total_reads.len(),
+                other.total_reads.len()
+            ));
+        }
+
+        for (feature_id, left_value) in &self.total_reads {
+            let Some(right_value) = other.total_reads.get(feature_id) else {
+                return Err(format!(
+                    "{label}: cell {cell_id} feature {feature_id} exists on left but not right"
+                ));
+            };
+
+            if (*left_value - *right_value).abs() > EPS {
+                return Err(format!(
+                    "{label}: cell {cell_id} feature {feature_id} differs: left={left_value} right={right_value}"
+                ));
+            }
+        }
+
+        for feature_id in other.total_reads.keys() {
+            if !self.total_reads.contains_key(feature_id) {
+                return Err(format!(
+                    "{label}: cell {cell_id} feature {feature_id} exists on right but not left"
+                ));
+            }
+        }
+
+        if self.multimapper.len() != other.multimapper.len() {
+            return Err(format!(
+                "{label}: cell {cell_id} multimapper size differs: left={} right={}",
+                self.multimapper.len(),
+                other.multimapper.len()
+            ));
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 [package]
 name = "scdata"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 
 description = "High-performance Rust library for constructing sparse single-cell UMI count data with deterministic MatrixMarket export"
@@ -22,3 +22,6 @@ mapping_info = "0.1.0"
 rayon = "1.10.0"
 regex = "1.11.1"
 
+[features]
+default = []
+compare = []

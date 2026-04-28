@@ -472,4 +472,57 @@ impl Scdata {
         self.total_feature_data_entries = 0;
         self.export_cell_ids.clear();
     }
+
+    #[cfg(feature = "compare")]
+    /// quickly compare two Scdata objects.
+    pub fn compare(&self, other: &Self, label: &str) -> Result<(), String> {
+        if self.export_cell_ids != other.export_cell_ids {
+            return Err(format!("{label}: export cells differ"));
+        }
+
+        if self.feature_ids_with_data != other.feature_ids_with_data {
+            return Err(format!("{label}: feature ids differ"));
+        }
+
+        if self.total_feature_data_entries != other.total_feature_data_entries {
+            return Err(format!(
+                "{label}: total feature entries differ: left={} right={}",
+                self.total_feature_data_entries,
+                other.total_feature_data_entries
+            ));
+        }
+
+        for bucket_id in 0..self.data.len() {
+            let left = &self.data[bucket_id];
+            let right = &other.data[bucket_id];
+
+            if left.len() != right.len() {
+                return Err(format!(
+                    "{label}: bucket {bucket_id} size differs: left={} right={}",
+                    left.len(),
+                    right.len()
+                ));
+            }
+
+            for (cell_id, left_cell) in left {
+                let Some(right_cell) = right.get(cell_id) else {
+                    return Err(format!(
+                        "{label}: cell {cell_id} exists on left but not right"
+                    ));
+                };
+
+                left_cell.compare(right_cell, label, *cell_id)?;
+            }
+
+            for cell_id in right.keys() {
+                if !left.contains_key(cell_id) {
+                    return Err(format!(
+                        "{label}: cell {cell_id} exists on right but not left"
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    } 
 }
