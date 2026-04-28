@@ -455,9 +455,7 @@ impl Scdata {
                     .total_reads
                     .retain(|feature_id, _| keep.contains(feature_id));
 
-                cell_data
-                    .seen
-                    .retain(|gene_umi| keep.contains(&gene_umi.0));
+                cell_data.seen.retain(|gene_umi| keep.contains(&gene_umi.0));
 
                 cell_data
                     .multimapper
@@ -487,8 +485,7 @@ impl Scdata {
         if self.total_feature_data_entries != other.total_feature_data_entries {
             return Err(format!(
                 "{label}: total feature entries differ: left={} right={}",
-                self.total_feature_data_entries,
-                other.total_feature_data_entries
+                self.total_feature_data_entries, other.total_feature_data_entries
             ));
         }
 
@@ -524,5 +521,5 @@ impl Scdata {
         }
 
         Ok(())
-    } 
+    }
 }

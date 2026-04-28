@@ -232,10 +232,28 @@ impl CellData {
         }
 
         if self.seen != other.seen {
+            let only_left: Vec<_> = self
+                .seen
+                .difference(&other.seen)
+                .take(10)
+                .cloned()
+                .collect();
+
+            let only_right: Vec<_> = other
+                .seen
+                .difference(&self.seen)
+                .take(10)
+                .cloned()
+                .collect();
+
             return Err(format!(
-                "{label}: cell {cell_id} seen UMI set differs: left={} right={}",
+                "{label}: cell {cell_id} distinct molecule count differs: left={} right={}
+  sample only-in-left (up to 10): {:?}
+  sample only-in-right (up to 10): {:?}",
                 self.seen.len(),
-                other.seen.len()
+                other.seen.len(),
+                only_left,
+                only_right
             ));
         }
 
