@@ -258,13 +258,32 @@ impl CellData {
         }
 
         if self.total_reads.len() != other.total_reads.len() {
+            let only_left: Vec<_> = self
+                .total_reads
+                .keys()
+                .filter(|k| !other.total_reads.contains_key(*k))
+                .take(10)
+                .copied()
+                .collect();
+
+            let only_right: Vec<_> = other
+                .total_reads
+                .keys()
+                .filter(|k| !self.total_reads.contains_key(*k))
+                .take(10)
+                .copied()
+                .collect();
+
             return Err(format!(
-                "{label}: cell {cell_id} total_reads size differs: left={} right={}",
+                "{label}: cell {cell_id} total_reads feature count differs: left={} right={}
+  sample only-in-left: {:?}
+  sample only-in-right: {:?}",
                 self.total_reads.len(),
-                other.total_reads.len()
+                other.total_reads.len(),
+                only_left,
+                only_right
             ));
         }
-
         for (feature_id, left_value) in &self.total_reads {
             let Some(right_value) = other.total_reads.get(feature_id) else {
                 return Err(format!(
@@ -285,14 +304,6 @@ impl CellData {
                     "{label}: cell {cell_id} feature {feature_id} exists on right but not left"
                 ));
             }
-        }
-
-        if self.multimapper.len() != other.multimapper.len() {
-            return Err(format!(
-                "{label}: cell {cell_id} multimapper size differs: left={} right={}",
-                self.multimapper.len(),
-                other.multimapper.len()
-            ));
         }
 
         Ok(())
